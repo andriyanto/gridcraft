@@ -17,6 +17,7 @@ mod ink_roundtrip;
 mod literal_category_roundtrip;
 mod locale_numfmt;
 mod malformed;
+mod merge_many;
 mod multilevel_category_roundtrip;
 mod note_box;
 mod ods_tests;

@@ -105,6 +105,16 @@ pub trait Host {
     fn range_values(&mut self, sheet: usize, range: RangeRef) -> Vec<Value> {
         range.iter().map(|c| self.cell_value(sheet, c)).collect()
     }
+    /// The block as an array that every formula reading it in this recalculation shares, when
+    /// the host keeps such arrays (a column of lookups reads one table once instead of once per
+    /// cell). `None`: the caller reads `range_values`.
+    fn range_array(&mut self, _sheet: usize, _range: RangeRef) -> Option<Arc<Array>> {
+        None
+    }
+    /// What the functions remember between calls in this recalculation.
+    fn memo(&mut self) -> Option<&mut gridcraft_functions::Memo> {
+        None
+    }
     /// The sheet's used range (`Sheet::used_range`, which walks every stored row). Hosts that
     /// keep the workbook unchanged while evaluating can remember it.
     fn used_range(&mut self, sheet: usize) -> Option<RangeRef> {
@@ -202,6 +212,9 @@ impl Ctx for FnCtx<'_, '_> {
     fn has_lambda(&self) -> bool {
         self.lambda.is_some()
     }
+    fn memo(&mut self) -> Option<&mut gridcraft_functions::Memo> {
+        self.ev.host.memo()
+    }
     /// A LAMBDA must give one value per group; an array result is #CALC!.
     fn call_lambda(&mut self, arg: Value) -> Option<Value> {
         let l = self.lambda.clone()?;
@@ -275,6 +288,9 @@ impl<'h> Evaluator<'h> {
         let (h, w) = (range.height() as usize, range.width() as usize);
         if (h as u64) * (w as u64) > MAX_CELLS {
             return Value::Error(CellError::Num);
+        }
+        if let Some(shared) = self.host.range_array(a.sheet, range) {
+            return Value::Array(shared);
         }
         let data = self.host.range_values(a.sheet, range);
         Array::new(h, w, data).map(Value::from).unwrap_or(Value::Error(CellError::Value))

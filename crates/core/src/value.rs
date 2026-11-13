@@ -329,12 +329,22 @@ pub fn compare(a: &Value, b: &Value) -> Ordering {
     }
 }
 
+/// `x` rounded to 15 significant digits.
+fn round15(x: f64) -> f64 {
+    if !x.is_finite() || x == 0.0 { x } else { format!("{x:.14e}").parse().unwrap_or(x) }
+}
+
+/// A key that two numbers share exactly when [`compare_numbers`] finds them equal: the bits of the
+/// number rounded to 15 significant digits (both zeros give one key). For looking numbers up in a
+/// hash table instead of comparing them one by one.
+pub fn number_key(x: f64) -> u64 {
+    let r = round15(x);
+    if r == 0.0 { 0 } else { r.to_bits() }
+}
+
 /// Compares numbers the way Excel does: both are rounded to 15 significant digits first, so binary
 /// noise such as `0.1+0.2` versus `0.3` counts as equal.
 pub fn compare_numbers(a: f64, b: f64) -> Ordering {
-    fn round15(x: f64) -> f64 {
-        if !x.is_finite() || x == 0.0 { x } else { format!("{x:.14e}").parse().unwrap_or(x) }
-    }
     if a == b {
         return Ordering::Equal;
     }

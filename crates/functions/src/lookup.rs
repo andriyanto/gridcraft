@@ -8,6 +8,7 @@ use std::cmp::Ordering;
 use gridcraft_core::{Array, CellError, Value, col_to_letters, compare};
 
 use crate::criteria::{has_wildcards, lookup_equal};
+use crate::memo::{Line, shared};
 use crate::util::{R, arg, array_val, as_array, has, int, num, opt_bool, opt_int, opt_num, text, text_val};
 use crate::{Arg, Ctx, FnSpec};
 
@@ -120,8 +121,67 @@ fn bsearch_upto(x: &Value, hay: &[Value], desc: bool) -> Option<usize> {
 }
 
 /// A 1-D view of an array (row or column), `None` when it is 2-D.
-fn vector(a: &Array) -> Option<Vec<Value>> {
-    if a.rows == 1 || a.cols == 1 { Some(a.data.clone()) } else { None }
+fn vector(a: &Array) -> Option<&[Value]> {
+    if a.rows == 1 || a.cols == 1 { Some(&a.data) } else { None }
+}
+
+/// Which line of its array a [`vector`] is.
+fn vector_line(a: &Array) -> Line {
+    if a.cols == 1 { Line::Col(0) } else { Line::Row(0) }
+}
+
+/// The keys a lookup searches: a line of the table, borrowed where the table stores it in one
+/// piece, else copied out (once per recalculation for a table many formulas look things up in).
+enum Keys<'a> {
+    Slice(&'a [Value]),
+    Shared(std::sync::Arc<Vec<Value>>),
+    Own(Vec<Value>),
+}
+
+impl std::ops::Deref for Keys<'_> {
+    type Target = [Value];
+    fn deref(&self) -> &[Value] {
+        match self {
+            Keys::Slice(s) => s,
+            Keys::Shared(v) => v,
+            Keys::Own(v) => v,
+        }
+    }
+}
+
+/// Column `col` of `a`, the array of the argument `src`.
+fn key_column<'a>(c: &mut dyn Ctx, src: &Value, a: &'a Array, col: usize) -> Keys<'a> {
+    if a.cols == 1 && col == 0 {
+        return Keys::Slice(&a.data);
+    }
+    if let Some(arr) = shared(src)
+        && let Some(keys) = c.memo().and_then(|m| m.column(arr, col))
+    {
+        return Keys::Shared(keys);
+    }
+    Keys::Own(column(a, col))
+}
+
+/// Row `r` of `a`.
+fn key_row(a: &Array, r: usize) -> Keys<'_> {
+    match a.data.get(r.saturating_mul(a.cols)..r.saturating_add(1).saturating_mul(a.cols)) {
+        Some(s) => Keys::Slice(s),
+        None => Keys::Own(row(a, r)),
+    }
+}
+
+/// [`find_exact`] over `hay`, which is `line` of the array of the argument `src`: from the
+/// second search of a line many formulas search, the answer comes from an index of it.
+fn find_exact_in(c: &mut dyn Ctx, src: &Value, line: Line, x: &Value, hay: &[Value], wild: bool, reverse: bool) -> Option<usize> {
+    let patterns = wild && matches!(x, Value::Text(t) if has_wildcards(t));
+    if !patterns
+        && let Some(arr) = shared(src)
+        && let Some(index) = c.memo().and_then(|m| m.exact(arr, line, hay))
+        && let Some(found) = index.find(x, hay, reverse)
+    {
+        return found;
+    }
+    find_exact(x, hay, wild, reverse)
 }
 
 fn column(a: &Array, c: usize) -> Vec<Value> {
@@ -135,10 +195,11 @@ fn row(a: &Array, r: usize) -> Vec<Value> {
 // ---------------------------------------------------------------------------------------------
 // VLOOKUP / HLOOKUP / LOOKUP / MATCH
 
-fn vh_lookup(args: &[Arg], vertical: bool) -> R<Value> {
+fn vh_lookup(args: &[Arg], c: &mut dyn Ctx, vertical: bool) -> R<Value> {
     let x = needle(args, 0)?;
-    let table = as_array(&arg(args, 1)?.value);
-    if let Value::Error(e) = &arg(args, 1)?.value {
+    let src = &arg(args, 1)?.value;
+    let table = as_array(src);
+    if let Value::Error(e) = src {
         return Err(*e);
     }
     let idx = num(args, 2)?;
@@ -148,11 +209,12 @@ fn vh_lookup(args: &[Arg], vertical: bool) -> R<Value> {
     }
     let idx = (idx.trunc() as usize).saturating_sub(1);
     let approx = opt_bool(args, 3, true)?;
-    let (keys, len) = if vertical { (column(&table, 0), table.cols) } else { (row(&table, 0), table.rows) };
+    let len = if vertical { table.cols } else { table.rows };
     if idx >= len {
         return Err(CellError::Ref);
     }
-    let pos = if approx { bsearch_last(&x, &keys, false) } else { find_exact(&x, &keys, true, false) };
+    let (keys, line) = if vertical { (key_column(c, src, &table, 0), Line::Col(0)) } else { (key_row(&table, 0), Line::Row(0)) };
+    let pos = if approx { bsearch_last(&x, &keys, false) } else { find_exact_in(c, src, line, &x, &keys, true, false) };
     let pos = pos.ok_or(CellError::NA)?;
     let v = if vertical { table.get(pos, idx) } else { table.get(idx, pos) };
     // An empty target stays blank, as in Excel: ISBLANK sees it as blank and `&` /
@@ -160,15 +222,15 @@ fn vh_lookup(args: &[Arg], vertical: bool) -> R<Value> {
     Ok(v.cloned().unwrap_or(Value::Empty))
 }
 
-fn vlookup(a: &[Arg], _c: &mut dyn Ctx) -> R<Value> {
-    vh_lookup(a, true)
+fn vlookup(a: &[Arg], c: &mut dyn Ctx) -> R<Value> {
+    vh_lookup(a, c, true)
 }
 
-fn hlookup(a: &[Arg], _c: &mut dyn Ctx) -> R<Value> {
-    vh_lookup(a, false)
+fn hlookup(a: &[Arg], c: &mut dyn Ctx) -> R<Value> {
+    vh_lookup(a, c, false)
 }
 
-fn lookup(args: &[Arg], _c: &mut dyn Ctx) -> R<Value> {
+fn lookup(args: &[Arg], c: &mut dyn Ctx) -> R<Value> {
     let x = needle(args, 0)?;
     let lv = &arg(args, 1)?.value;
     if let Value::Error(e) = lv {
@@ -176,7 +238,7 @@ fn lookup(args: &[Arg], _c: &mut dyn Ctx) -> R<Value> {
     }
     let la = as_array(lv);
     if args.len() >= 3 {
-        let keys = if la.rows == 1 || la.cols == 1 { la.data.clone() } else { column(&la, 0) };
+        let keys = if la.rows == 1 || la.cols == 1 { Keys::Slice(&la.data) } else { key_column(c, lv, &la, 0) };
         let pos = bsearch_last(&x, &keys, false).ok_or(CellError::NA)?;
         let rv = &arg(args, 2)?.value;
         if let Value::Error(e) = rv {
@@ -195,30 +257,31 @@ fn lookup(args: &[Arg], _c: &mut dyn Ctx) -> R<Value> {
     // Array form: search the first row of a wide array, else the first column; return the
     // matching entry from the last row / column.
     if la.cols > la.rows {
-        let keys = row(&la, 0);
+        let keys = key_row(&la, 0);
         let pos = bsearch_last(&x, &keys, false).ok_or(CellError::NA)?;
         Ok(la.get(la.rows - 1, pos).cloned().unwrap_or(Value::Empty))
     } else {
-        let keys = column(&la, 0);
+        let keys = key_column(c, lv, &la, 0);
         let pos = bsearch_last(&x, &keys, false).ok_or(CellError::NA)?;
         Ok(la.get(pos, la.cols - 1).cloned().unwrap_or(Value::Empty))
     }
 }
 
-fn match_fn(args: &[Arg], _c: &mut dyn Ctx) -> R<Value> {
+fn match_fn(args: &[Arg], c: &mut dyn Ctx) -> R<Value> {
     let x = needle(args, 0)?;
     let av = &arg(args, 1)?.value;
     if let Value::Error(e) = av {
         return Err(*e);
     }
-    let hay = vector(&as_array(av)).ok_or(CellError::NA)?;
+    let a = as_array(av);
+    let hay = vector(&a).ok_or(CellError::NA)?;
     let mt = opt_num(args, 2, 1.0)?;
     let pos = if mt == 0.0 {
-        find_exact(&x, &hay, true, false)
+        find_exact_in(c, av, vector_line(&a), &x, hay, true, false)
     } else if mt > 0.0 {
-        bsearch_last(&x, &hay, false)
+        bsearch_last(&x, hay, false)
     } else {
-        bsearch_last(&x, &hay, true)
+        bsearch_last(&x, hay, true)
     };
     pos.map(|p| Value::Number((p + 1) as f64)).ok_or(CellError::NA)
 }
@@ -226,8 +289,9 @@ fn match_fn(args: &[Arg], _c: &mut dyn Ctx) -> R<Value> {
 // ---------------------------------------------------------------------------------------------
 // XLOOKUP / XMATCH
 
-/// Core XMATCH search: 0-based position in `hay`.
-fn xsearch(x: &Value, hay: &[Value], match_mode: i64, search_mode: i64) -> R<Option<usize>> {
+/// Core XMATCH search: 0-based position in `hay`, which is `line` of the array of the argument
+/// `src`.
+fn xsearch(c: &mut dyn Ctx, (src, line): (&Value, Line), x: &Value, hay: &[Value], match_mode: i64, search_mode: i64) -> R<Option<usize>> {
     if !matches!(match_mode, -1..=2) || !matches!(search_mode, -2 | -1 | 1 | 2) {
         return Err(CellError::Value);
     }
@@ -258,7 +322,7 @@ fn xsearch(x: &Value, hay: &[Value], match_mode: i64, search_mode: i64) -> R<Opt
         });
     }
     let reverse = search_mode == -1;
-    if let Some(p) = find_exact(x, hay, match_mode == 2, reverse) {
+    if let Some(p) = find_exact_in(c, src, line, x, hay, match_mode == 2, reverse) {
         return Ok(Some(p));
     }
     if match_mode == 0 || match_mode == 2 {
@@ -297,7 +361,7 @@ fn bsearch_exact(x: &Value, hay: &[Value], desc: bool) -> Option<usize> {
     if binary_order(v, x, desc) == Ordering::Equal { Some(p) } else { None }
 }
 
-fn xlookup(args: &[Arg], _c: &mut dyn Ctx) -> R<Value> {
+fn xlookup(args: &[Arg], c: &mut dyn Ctx) -> R<Value> {
     let x = needle(args, 0)?;
     let lv = &arg(args, 1)?.value;
     if let Value::Error(e) = lv {
@@ -317,7 +381,7 @@ fn xlookup(args: &[Arg], _c: &mut dyn Ctx) -> R<Value> {
     }
     let mm = if has(args, 4) { opt_int(args, 4, 0)? } else { 0 };
     let sm = if has(args, 5) { opt_int(args, 5, 1)? } else { 1 };
-    match xsearch(&x, &hay, mm, sm)? {
+    match xsearch(c, (lv, vector_line(&la)), &x, hay, mm, sm)? {
         Some(p) => {
             if vertical {
                 let r = row(&ra, p);
@@ -343,16 +407,17 @@ fn xlookup(args: &[Arg], _c: &mut dyn Ctx) -> R<Value> {
     }
 }
 
-fn xmatch(args: &[Arg], _c: &mut dyn Ctx) -> R<Value> {
+fn xmatch(args: &[Arg], c: &mut dyn Ctx) -> R<Value> {
     let x = needle(args, 0)?;
     let lv = &arg(args, 1)?.value;
     if let Value::Error(e) = lv {
         return Err(*e);
     }
-    let hay = vector(&as_array(lv)).ok_or(CellError::Value)?;
+    let la = as_array(lv);
+    let hay = vector(&la).ok_or(CellError::Value)?;
     let mm = if has(args, 2) { int(args, 2)? } else { 0 };
     let sm = if has(args, 3) { int(args, 3)? } else { 1 };
-    xsearch(&x, &hay, mm, sm)?.map(|p| Value::Number((p + 1) as f64)).ok_or(CellError::NA)
+    xsearch(c, (lv, vector_line(&la)), &x, hay, mm, sm)?.map(|p| Value::Number((p + 1) as f64)).ok_or(CellError::NA)
 }
 
 // ---------------------------------------------------------------------------------------------

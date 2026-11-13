@@ -3,7 +3,7 @@
 use std::cmp::Ordering;
 
 use gridcraft_core::parse::parse_number_text;
-use gridcraft_core::{CellError, Value, compare_numbers, compare_text};
+use gridcraft_core::{CellError, Value, compare_numbers, compare_text, number_key};
 
 /// Longest text criterion COUNTIF and its relatives accept, in UTF-16 code units as Excel
 /// counts them (😀 is two units); a longer one is `#VALUE!`.
@@ -37,6 +37,33 @@ enum Operand {
     CutText(String),
     /// Nothing after the operator (`"="`, `"<>"`) or an empty criterion.
     Blank,
+}
+
+/// What an equality criterion looks for, for finding the cells that may match it in an index
+/// instead of testing every cell: a number as [`compare_numbers`] tells numbers apart, or text
+/// without regard to case.
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
+pub(crate) enum CritKey {
+    Number(u64),
+    Text(String),
+}
+
+/// Calls `f` with every key a criterion that `v` matches may have (see [`Criterion::index_key`]):
+/// a number's, and for text its own and, when it reads as a number, that number's (`"10"` matches
+/// the criterion `10`). `false` for a value an index can't hold (an array within an array).
+pub(crate) fn cell_keys(v: &Value, f: &mut dyn FnMut(CritKey)) -> bool {
+    match v {
+        Value::Number(n) => f(CritKey::Number(number_key(*n))),
+        Value::Text(t) => {
+            if let Some(n) = parse_number_text(t) {
+                f(CritKey::Number(number_key(n)));
+            }
+            f(CritKey::Text(t.chars().map(lower_char).collect()));
+        }
+        Value::Array(_) => return false,
+        Value::Empty | Value::Bool(_) | Value::Error(_) => {}
+    }
+    true
 }
 
 /// A parsed criterion.
@@ -123,6 +150,20 @@ impl Criterion {
         Criterion { op, operand, bare_empty: false }
     }
 
+    /// The key of an "equals this number" or "equals this text" criterion (no wildcards): every
+    /// cell it matches has that key among its [`cell_keys`]. `None` for the other criteria,
+    /// which test every cell.
+    pub(crate) fn index_key(&self) -> Option<CritKey> {
+        if self.bare_empty || self.op != Op::Eq {
+            return None;
+        }
+        match &self.operand {
+            Operand::Number(n) if !n.is_nan() => Some(CritKey::Number(number_key(*n))),
+            Operand::Text(pat) if !has_wildcards(pat) => Some(CritKey::Text(pat.chars().map(lower_char).collect())),
+            _ => None,
+        }
+    }
+
     fn matches_blank(&self, v: &Value) -> bool {
         let blank = matches!(v, Value::Empty);
         match self.op {
@@ -154,11 +195,7 @@ impl Criterion {
         match self.op {
             Op::Eq | Op::Ne => {
                 // Blank cells hold no text: `"*"` skips them and `"<>*"` counts them.
-                let cell_text = match v {
-                    Value::Text(t) => Some(t.to_string()),
-                    _ => None,
-                };
-                let m = cell_text.is_some_and(|t| wildcard_match(pat, &t));
+                let m = matches!(v, Value::Text(t) if wildcard_match(pat, t));
                 if self.op == Op::Eq { m } else { !m }
             }
             _ => match v {
@@ -179,26 +216,27 @@ impl Criterion {
 
     /// Whether a cell value satisfies the criterion.
     pub(crate) fn matches(&self, v: &Value) -> bool {
+        // An array in a cell counts as its first value.
         let v = match v {
-            Value::Array(a) => a.data.first().cloned().unwrap_or(Value::Empty),
-            other => other.clone(),
+            Value::Array(a) => a.data.first().unwrap_or(&Value::Empty),
+            other => other,
         };
         if self.bare_empty {
-            return matches!(&v, Value::Empty) || matches!(&v, Value::Text(t) if t.is_empty());
+            return matches!(v, Value::Empty) || matches!(v, Value::Text(t) if t.is_empty());
         }
         match &self.operand {
-            Operand::Blank => self.matches_blank(&v),
-            Operand::Number(n) => self.matches_number(&v, *n),
-            Operand::Bool(b) => match &v {
+            Operand::Blank => self.matches_blank(v),
+            Operand::Number(n) => self.matches_number(v, *n),
+            Operand::Bool(b) => match v {
                 Value::Bool(x) => cmp_op(self.op, x.cmp(b)),
                 _ => self.op == Op::Ne,
             },
-            Operand::Error(e) => match &v {
+            Operand::Error(e) => match v {
                 Value::Error(x) => cmp_op(self.op, x.code().cmp(&e.code())),
                 _ => self.op == Op::Ne,
             },
-            Operand::Text(pat) => self.matches_text(&v, pat),
-            Operand::CutText(kept) => self.matches_cut_text(&v, kept),
+            Operand::Text(pat) => self.matches_text(v, pat),
+            Operand::CutText(kept) => self.matches_cut_text(v, kept),
         }
     }
 }

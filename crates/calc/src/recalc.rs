@@ -271,16 +271,21 @@ impl Calc {
         self.rebuild(wb);
         // Spills are laid out again from the formulas where they are now (a structural edit moves
         // or deletes the formulas, not the values they spilled).
+        // The formulas that have spilled keep their place: where two arrays want the same cells,
+        // the one already there stays and the other shows #SPILL!, as when the second was entered.
+        // Laid out in sheet order alone, a full recalculation could swap the two.
+        let mut spilled: HashSet<Key> = HashSet::default();
         for i in 0..wb.sheets.len() {
             if wb.sheet(i).is_some_and(|s| !s.spill_ranges.is_empty() || !s.spill.is_empty())
                 && let Some(sh) = wb.sheet_mut(i)
             {
+                spilled.extend(sh.spill_ranges.keys().map(|a| (i, *a)));
                 sh.spill.clear();
                 sh.spill_ranges.clear();
             }
         }
         let all: Vec<Key> = self.graph.nodes.keys().copied().collect();
-        self.run(wb, all, true);
+        self.run(wb, all, Some(spilled));
     }
 
     /// Updates the graph for cells whose content changed and recalculates what depends on them.
@@ -341,7 +346,7 @@ impl Calc {
         if wb.calc.mode == CalcMode::Manual {
             // Only the edited formulas themselves are evaluated.
             let own: Vec<Key> = changed.iter().copied().filter(|k| self.graph.nodes.contains_key(k)).collect();
-            self.run(wb, own, false);
+            self.run(wb, own, None);
             return;
         }
         let mut seeds: Vec<Key> = changed.to_vec();
@@ -407,7 +412,7 @@ impl Calc {
         let dirty = self.dirty_closure(wb, &seeds, &areas);
         let t1 = prof_now();
         let n = dirty.len();
-        self.run(wb, dirty, false);
+        self.run(wb, dirty, None);
         if std::env::var_os("GRIDCRAFT_PROFILE").is_some() {
             eprintln!("recalc: {} seeds, closure {} cells {:.1} ms, run {:.1} ms", seeds.len(), n, t1 - t0, prof_now() - t1);
         }
@@ -468,8 +473,9 @@ impl Calc {
         seen.into_iter().collect()
     }
 
-    /// Evaluates the dirty set and writes results (and spills) back.
-    fn run(&mut self, wb: &mut Workbook, mut dirty: Vec<Key>, full: bool) {
+    /// Evaluates the dirty set and writes results (and spills) back. `spilled`, for a full
+    /// recalculation, is the formulas that had spilled before it: their arrays are laid out first.
+    fn run(&mut self, wb: &mut Workbook, mut dirty: Vec<Key>, mut spilled: Option<HashSet<Key>>) {
         let mut dynamic_again = !self.graph.dynamic.is_empty();
         self.last_recalc_cells = 0;
         for _round in 0..8 {
@@ -517,15 +523,17 @@ impl Calc {
                 self.circular.retain(|k| !evaluated.contains(k));
             }
             self.circular.extend(cycles);
-            let mut spill_changes = self.write_back(wb, &dirty, results, &spills);
+            // Sheet order, after the formulas that had spilled before a full recalculation.
+            let layout: Vec<Key> = match spilled.take().filter(|s| !s.is_empty()) {
+                Some(first) => dirty.iter().filter(|k| first.contains(k)).chain(dirty.iter().filter(|k| !first.contains(k))).copied().collect(),
+                None => Vec::new(),
+            };
+            let mut spill_changes = self.write_back(wb, if layout.is_empty() { &dirty } else { &layout }, results, &spills);
             // Formulas with references only known while evaluating (INDIRECT, OFFSET) may have read
             // a spill area before it was laid out: they are evaluated once more.
             if dynamic_again && !spills.is_empty() {
                 dynamic_again = false;
                 spill_changes.extend(self.graph.dynamic.iter().copied());
-            }
-            if full {
-                // Everything was already evaluated once; spill dependents need another pass.
             }
             if std::env::var_os("GRIDCRAFT_PROFILE").is_some() {
                 eprintln!("  write-back {:.1} ms", prof_now() - tw);
@@ -613,7 +621,10 @@ impl Calc {
                     (_, None) => true,
                     (None, Some(_)) => false,
                 };
-                spill_changes.extend(dependents.into_iter().filter(|dependent| dependent != key || freed_old_range));
+                // A formula that reads cells of its own area is evaluated again when the area
+                // changes: reading them is a circular reference only once they are its own.
+                let moved = sheet.spill_ranges.get(&key.1).copied() != old;
+                spill_changes.extend(dependents.into_iter().filter(|dependent| dependent != key || freed_old_range || moved));
             }
             if let Some(previous) = old
                 && !sheet.spill_ranges.get(&key.1).is_some_and(|current| current.contains(previous.start) && current.contains(previous.end))

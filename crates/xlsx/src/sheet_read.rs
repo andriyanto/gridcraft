@@ -118,6 +118,21 @@ fn record_python_spill(st: &mut RowState, sheet: &mut Sheet, pos: CellRef) {
     }
 }
 
+/// Records that the dynamic-array formula read at `pos` had spilled when the file was saved (it
+/// declares a range of more than one cell). Its values are not kept: the calculation on opening
+/// fills them again. What is kept is its place: where two arrays want the same cells, the one
+/// that had spilled spills again and the other shows `#SPILL!`, as the saved workbook showed them.
+/// Charged like [`dynamic_range`]'s scans.
+fn record_formula_spill(st: &mut RowState, sheet: &mut Sheet, pos: CellRef) {
+    if st.dynamic_checks > MAX_DYNAMIC_CHECKS {
+        return;
+    }
+    st.dynamic_checks = st.dynamic_checks.saturating_add(st.dynamic.len() as u64);
+    if let Some(r) = st.dynamic.iter().rev().find(|r| r.start == pos).copied() {
+        sheet.spill_ranges.insert(pos, r);
+    }
+}
+
 /// Past the scan budget, the cells of a Python spill read afterwards were kept as plain cells, not
 /// as its spilled values, and a result rebuilt over them would block itself. Every Python spill of
 /// such a sheet keeps its values as plain values instead, with no live spill.
@@ -626,6 +641,8 @@ fn read_cell(cx: &mut Ctx<'_>, sheet: &mut Sheet, st: &mut RowState, c: &El, pos
     };
     if py.is_some() {
         record_python_spill(st, sheet, pos);
+    } else if formula.as_ref().is_some_and(|f| f.dynamic && f.array.is_none()) {
+        record_formula_spill(st, sheet, pos);
     }
     // A formula without dynamic-array metadata is a legacy formula, unless entered as a
     // Ctrl+Shift+Enter array or unwrapped from Google Sheets' export (#2871).

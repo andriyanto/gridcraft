@@ -81,6 +81,9 @@ pub(super) struct PassHost<'a> {
     /// cell and last column; each value maps a last row to the block's result (`None`: the block
     /// has a formula, a Python cell, an error value or a spilled value, so every longer one has too).
     sums: HashMap<(usize, CellRef, u32), BlockSums>,
+    /// The spill areas the sheet holds for the formulas being evaluated, innermost last: what a
+    /// formula spilled last time is its own result, so reading it is a circular reference.
+    own_areas: Vec<(Key, RangeRef)>,
     /// The kept results of the Python cells in the pass: a Python cell isn't evaluated, its
     /// result is laid out (an array spills from the cell, as a formula's does). Each one is in
     /// `pending` until it is laid out, so a formula that reads it first gets its new value.
@@ -122,6 +125,7 @@ impl<'a> PassHost<'a> {
             stack_top: 0,
             out_of_stack: false,
             sums: HashMap::default(),
+            own_areas: Vec::new(),
             python: HashMap::default(),
         }
     }
@@ -227,6 +231,26 @@ fn stored_spill_in<'s>(sheet: &'s gridcraft_model::Sheet, range: RangeRef, f: &m
 }
 
 impl PassHost<'_> {
+    /// The formula being evaluated whose own spill area, as the sheet holds it, covers `c` (its
+    /// anchor aside: reading that is a formula in progress already). Reading the cell reads the
+    /// formula's own last result: a circular reference, `#CIRC!`, and the same whether the
+    /// formula has spilled before or is laid out for the first time and evaluated again.
+    /// Iterative calculation reads the previous value instead, as it does for any loop.
+    fn own_spill_at(&self, sheet: usize, c: CellRef) -> Option<Key> {
+        if self.iterate {
+            return None;
+        }
+        self.own_areas.iter().rev().find(|(k, r)| k.0 == sheet && k.1 != c && r.contains(c)).map(|(k, _)| *k)
+    }
+
+    /// Lists `k` among the circular references, once.
+    fn note_cycle(&mut self, k: Key) {
+        self.cycle = true;
+        if self.cycle_seen.insert(k) {
+            self.cycles.push(k);
+        }
+    }
+
     /// Calculates `k` (and the formulas it reads) with bounded stack: when [`Self::compute`] would
     /// go deeper than [`MAX_NESTED`], it suspends what is in progress, the formula it needed is
     /// calculated from here, then the suspended ones again (reading the results kept so far).
@@ -312,6 +336,10 @@ impl PassHost<'_> {
             self.stack_top = stack_position();
         }
         self.in_progress.insert(k);
+        let own_area = self.wb.sheet(k.0).and_then(|s| s.spill_ranges.get(&k.1)).copied().filter(|r| !r.is_single());
+        if let Some(r) = own_area {
+            self.own_areas.push((k, r));
+        }
         self.depth += 1;
         let outer_taint = std::mem::replace(&mut self.taint, false);
         if self.iterate {
@@ -323,6 +351,9 @@ impl PassHost<'_> {
             let mut ev = Evaluator::new(self, k.0, k.1);
             ev.value(&expr)
         };
+        if own_area.is_some() {
+            self.own_areas.pop();
+        }
         let out_of_stack = std::mem::replace(&mut self.out_of_stack, outer_out_of_stack);
         if out_of_stack && self.depth > 1 && self.suspend.is_none() {
             // It ran out of the stack left below the formulas that read it: it is calculated
@@ -594,6 +625,10 @@ impl Host for PassHost<'_> {
             }
             return arr.get(dr, dc).cloned().unwrap_or_default();
         }
+        if let Some(owner) = self.own_spill_at(sheet, c) {
+            self.note_cycle(owner);
+            return Value::Error(CellError::Circ);
+        }
         self.wb.sheet(sheet).map(|s| s.value(c)).unwrap_or_default()
     }
     fn range_values(&mut self, sheet: usize, range: RangeRef) -> Vec<Value> {
@@ -623,6 +658,30 @@ impl Host for PassHost<'_> {
         #[cfg(test)]
         {
             self.spill_visits += _seen;
+        }
+        // The spilled values of a formula being evaluated are its own last result.
+        if !self.iterate && !self.own_areas.is_empty() {
+            let mut owners = Vec::new();
+            for &(k, area) in &self.own_areas {
+                if k.0 != sheet || !area.intersects(&range) {
+                    continue;
+                }
+                owners.push(k);
+                let (r0, c0) = (range.start.row.max(area.start.row), range.start.col.max(area.start.col));
+                let (r1, c1) = (range.end.row.min(area.end.row), range.end.col.min(area.end.col));
+                for r in r0..=r1 {
+                    for cc in c0..=c1 {
+                        if CellRef::new(r, cc) != k.1
+                            && let Some(slot) = out.get_mut((r - range.start.row) as usize * w + (cc - range.start.col) as usize)
+                        {
+                            *slot = Value::Error(CellError::Circ);
+                        }
+                    }
+                }
+            }
+            for k in owners {
+                self.note_cycle(k);
+            }
         }
         for (i, c) in formulas {
             let v = self.cell_value(sheet, c);

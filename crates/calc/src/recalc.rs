@@ -1069,6 +1069,86 @@ pub(crate) mod tests {
         assert!(large < small * 8 + Duration::from_millis(100), "5k rows {small:?}, 20k rows {large:?}");
     }
 
+    /// A block is read into one array from its second read on, and the array is dropped when a
+    /// formula of the pass turns out to spill: what the next read gives holds the spilled values.
+    #[test]
+    fn a_block_read_again_is_one_shared_array_until_an_array_spills() {
+        let mut wb = Workbook::new();
+        let sh = wb.sheet_mut(0).unwrap();
+        for r in 0..40 {
+            sh.cells.set(CellRef::new(r, 0), Cell::value(Value::Number(f64::from(r))));
+        }
+        let spilling = (0, CellRef::new(0, 2));
+        sh.cells.set(spilling.1, Cell::formula(Formula::new("=SEQUENCE(40,2)")));
+        let mut exprs = HashMap::default();
+        exprs.insert(spilling, wb.sheet(0).unwrap().cell(spilling.1).unwrap().formula.as_ref().unwrap().expr_arc().unwrap());
+        let mut rng = 1u64;
+        let mut host = PassHost::new(&wb, &exprs, &mut rng, 0.0);
+        let (constants, spilled) = (RangeRef::parse("A1:A40").unwrap(), RangeRef::parse("D1:D40").unwrap());
+        assert!(host.range_array(0, constants).is_none(), "a first read is not kept");
+        let first = host.range_array(0, constants).unwrap();
+        let again = host.range_array(0, constants).unwrap();
+        assert!(std::sync::Arc::ptr_eq(&first, &again), "one array for every later read");
+        assert_eq!(first.data.get(39), Some(&Value::Number(39.0)));
+        // A block too small to be worth keeping is read each time.
+        assert!(host.range_array(0, RangeRef::parse("A1:A8").unwrap()).is_none());
+        assert!(host.range_array(0, RangeRef::parse("A1:A8").unwrap()).is_none());
+        // Column D before the formula in C1 is calculated: empty, and kept from the second read.
+        assert!(host.range_array(0, spilled).is_none());
+        let before = host.range_array(0, spilled).unwrap();
+        assert!(before.data.iter().all(Value::is_empty));
+        host.calculate(spilling);
+        let after = host.range_array(0, spilled).unwrap();
+        assert_eq!(after.data.first(), Some(&Value::Number(2.0)), "the spilled values, not the array kept before them");
+        let constants_again = host.range_array(0, constants).unwrap();
+        assert!(!std::sync::Arc::ptr_eq(&first, &constants_again), "every kept array was dropped");
+        assert_eq!(constants_again.data, first.data);
+    }
+
+    /// One exact-match lookup per row, all into the same two columns.
+    fn lookup_rows(rows: u32) -> Workbook {
+        let mut wb = Workbook::new();
+        if let Some(sh) = wb.sheet_mut(0) {
+            for r in 0..rows {
+                sh.cells.set(CellRef::new(r, 0), Cell::value(Value::Number(f64::from(r))));
+                sh.cells.set(CellRef::new(r, 1), Cell::value(Value::Number(f64::from(r * 2))));
+                let f = format!("=VLOOKUP({},$A$1:$B${rows},2,FALSE)+COUNTIF($A$1:$A${rows},{})", (r * 7919) % rows, r % 50);
+                sh.cells.set(CellRef::new(r, 3), Cell::formula(Formula::new(&f)));
+            }
+        }
+        wb
+    }
+
+    fn open_lookups(rows: u32) -> Duration {
+        let mut wb = lookup_rows(rows);
+        let started = gridcraft_core::date::unix_now_ms().unwrap_or(0.0);
+        Calc::new().recalc_all(&mut wb);
+        let ended = gridcraft_core::date::unix_now_ms().unwrap_or(started);
+        let r = rows - 1;
+        let expected = f64::from(((r * 7919) % rows) * 2 + 1);
+        assert_eq!(wb.sheet(0).map(|s| s.value(CellRef::new(r, 3))), Some(Value::Number(expected)));
+        Duration::from_secs_f64((ended - started).max(0.0) / 1000.0)
+    }
+
+    #[test]
+    fn a_column_of_lookups_calculates_correctly() {
+        // The values behind the timing test below, checked on every run.
+        open_lookups(300);
+    }
+
+    #[test]
+    #[ignore = "timing-sensitive; run with --ignored in release"]
+    fn a_column_of_lookups_scales_linearly() {
+        // Each row looks a value up in, and counts one in, the same table. Every call used to
+        // read the table into an array of its own and search it from the top: 4x the rows took
+        // 16x the time (20,000 rows: half a minute). Linear is 4x; allow 8x.
+        let best = |rows| (0..3).map(|_| open_lookups(rows)).min().unwrap_or_default();
+        let small = best(5_000);
+        let large = best(20_000);
+        assert!(large < small * 8 + Duration::from_millis(100), "5k rows {small:?}, 20k rows {large:?}");
+        assert!(large < Duration::from_secs(5), "20k rows {large:?}");
+    }
+
     #[test]
     fn range_dependents_after_edits() {
         // Formulas that read ranges, wide ranges and whole columns, found again after edits.

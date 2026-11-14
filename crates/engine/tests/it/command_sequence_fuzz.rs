@@ -319,7 +319,7 @@ impl Harness {
         }
         self.check_state(i)?;
         // The redo history has the same byte budget as the undo history, and one undone step can
-        // retain most of it (a border down a whole column makes a million cells). The steps it
+        // retain most of it (a value filled down a whole column is a million cells). The steps it
         // dropped can't be redone, so the final workbook is out of reach and isn't compared.
         let all_kept = self.s.doc().expect("document").redo.len() >= redoable + n;
         // Only the steps undone here: an `edit.undo {steps}` in the sequence may have left more.
@@ -1153,7 +1153,7 @@ fn view_mode_switch_is_not_an_undo_difference() {
 /// otherwise undoing everything can't give back the workbook the episode started from.
 #[test]
 fn an_episode_ends_before_the_undo_byte_budget_drops_steps() {
-    let mut steps: Vec<Step> = vec![("home.borders".to_string(), json!({"preset": "all", "range": "19:21"}))];
+    let mut steps: Vec<Step> = vec![("range.fill".to_string(), json!({"input": "1", "range": "19:21"}))];
     steps.extend((0..60).map(|i| ("cell.set".to_string(), json!({"cell": "J2", "input": i.to_string()}))));
     let failure = replay("sales", &steps);
     assert!(failure.is_none(), "{failure:?}");
@@ -1164,7 +1164,7 @@ fn an_episode_ends_before_the_undo_byte_budget_drops_steps() {
 #[test]
 fn a_redo_step_the_byte_budget_dropped_is_not_a_redo_difference() {
     let steps = [
-        ("home.borders".to_string(), json!({"preset": "outside", "range": "I:I"})),
+        ("range.fill".to_string(), json!({"input": "1", "range": "I:I"})),
         ("home.deleteCells".to_string(), json!({"range": "E12:G14", "shift": "column"})),
     ];
     let failure = replay("budget", &steps);

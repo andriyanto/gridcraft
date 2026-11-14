@@ -294,3 +294,133 @@ fn picture_metadata_limits_and_relationship_read_errors_do_not_block_workbooks()
         assert!(report.warnings.iter().any(|w| w.contains("cell-picture data could not be read")), "{:?}", report.warnings);
     }
 }
+
+fn typed_errors(cells: &[(&str, CellError)]) -> Workbook {
+    let mut wb = Workbook::new();
+    let sheet = wb.sheet_mut(0).unwrap();
+    for (cell, error) in cells {
+        sheet.set_value(at(cell), Value::Error(*error));
+    }
+    wb
+}
+
+/// The cell `cell` of the first sheet's XML in the written package.
+fn written_cell(bytes: &[u8], cell: &str) -> crate::xml::El {
+    let mut package = Package::open(bytes).unwrap();
+    let sheet = package.read_xml("xl/worksheets/sheet1.xml").unwrap().unwrap();
+    let data = sheet.child("sheetData").unwrap();
+    data.kids("row").flat_map(|row| row.kids("c")).find(|c| c.attr("r") == Some(cell)).unwrap_or_else(|| panic!("no cell {cell}")).clone()
+}
+
+/// A #SPILL! or #CALC! that is a cell's own value (pasted as a value, loaded by a query) used to
+/// be saved as #VALUE! alone, so it opened as #VALUE! (found by `command_sequence_fuzz`, seed 174).
+#[test]
+fn typed_spill_and_calc_errors_survive_a_save() {
+    let cells = [("A1", CellError::Spill), ("A2", CellError::Calc), ("A3", CellError::Value), ("A4", CellError::NA), ("A5", CellError::Spill)];
+    let bytes = write_xlsx(&typed_errors(&cells)).unwrap();
+    let (back, report) = read_xlsx(&bytes).unwrap();
+    for (cell, error) in cells {
+        assert_eq!(back.sheet(0).unwrap().value(at(cell)), Value::Error(error), "{cell}");
+        assert!(back.sheet(0).unwrap().cells.get(at(cell)).unwrap().formula.is_none());
+    }
+    assert!(report.warnings.is_empty(), "{:?}", report.warnings);
+
+    // As Excel saves them: the #VALUE! fallback, and value metadata naming the error.
+    for (cell, vm) in [("A1", Some("1")), ("A2", Some("2")), ("A3", None), ("A4", None), ("A5", Some("1"))] {
+        let c = written_cell(&bytes, cell);
+        assert_eq!((c.attr("t"), c.attr("vm")), (Some("e"), vm), "{cell}");
+    }
+    assert_eq!(written_cell(&bytes, "A1").child("v").unwrap().text, "#VALUE!");
+    assert_eq!(written_cell(&bytes, "A4").child("v").unwrap().text, "#N/A");
+    let mut package = Package::open(&bytes).unwrap();
+    let structures = package.read_xml("xl/richData/rdrichvaluestructure.xml").unwrap().unwrap();
+    let kinds: Vec<_> = structures.kids("s").map(|s| (s.attr("t"), s.kids("k").map(|k| k.attr("n")).collect::<Vec<_>>())).collect();
+    assert_eq!(kinds, [(Some("_error"), vec![Some("errorType")])]);
+    let values = package.read_xml("xl/richData/rdrichvalue.xml").unwrap().unwrap();
+    let codes: Vec<_> = values.kids("rv").map(|rv| rv.child("v").unwrap().text.clone()).collect();
+    assert_eq!(codes, ["8", "13"]);
+    assert!(package.read_xml("xl/richData/richValueRel.xml").unwrap().is_none(), "no pictures, no image list");
+}
+
+#[test]
+fn a_formula_showing_spill_keeps_its_plain_cached_fallback() {
+    // The formula gives the error back when it is calculated, so its cell needs no rich value.
+    let mut wb = Workbook::new();
+    let sheet = wb.sheet_mut(0).unwrap();
+    let mut f = Cell::formula(Formula::new("A2:A3"));
+    f.value = Value::Error(CellError::Spill);
+    sheet.cells.set(at("C1"), f);
+    let bytes = write_xlsx(&wb).unwrap();
+    let c = written_cell(&bytes, "C1");
+    assert_eq!((c.attr("t"), c.attr("vm"), c.child("v").map(|v| v.text.as_str())), (Some("e"), None, Some("#VALUE!")));
+    assert!(Package::open(&bytes).unwrap().read_xml("xl/richData/rdrichvalue.xml").unwrap().is_none());
+}
+
+#[test]
+fn typed_errors_and_pictures_share_the_rich_values() {
+    let mut wb = typed_errors(&[("A1", CellError::Calc), ("A2", CellError::Spill), ("C5", CellError::Calc)]);
+    let green = Arc::new(picture(png(), "image/png", "green"));
+    wb.sheet_mut(0).unwrap().set_picture(at("B2"), green.clone());
+    wb.sheet_mut(0).unwrap().set_picture(at("D9"), Arc::new(picture(jpeg(), "image/jpeg", "gray")));
+    let bytes = write_xlsx(&wb).unwrap();
+    let (back, report) = read_xlsx(&bytes).unwrap();
+    let sheet = back.sheet(0).unwrap();
+    assert_eq!(sheet.cell_pictures.get(&at("B2")).map(Arc::as_ref), Some(green.as_ref()));
+    assert_eq!(sheet.cell_pictures.get(&at("D9")).map(|p| p.alt.as_str()), Some("gray"));
+    for (cell, error) in [("A1", CellError::Calc), ("A2", CellError::Spill), ("C5", CellError::Calc)] {
+        assert_eq!(sheet.value(at(cell)), Value::Error(error), "{cell}");
+        assert!(!sheet.cell_pictures.contains_key(&at(cell)));
+    }
+    assert!(report.warnings.is_empty(), "{:?}", report.warnings);
+    let mut package = Package::open(&bytes).unwrap();
+    let structures = package.read_xml("xl/richData/rdrichvaluestructure.xml").unwrap().unwrap();
+    assert_eq!(structures.kids("s").map(|s| s.attr("t")).collect::<Vec<_>>(), [Some("_localImage"), Some("_error")]);
+    assert_eq!(package.read_xml("xl/metadata.xml").unwrap().unwrap().child("valueMetadata").unwrap().attr_u32("count"), Some(4));
+}
+
+/// Excel's own `_error` structure has more keys than `errorType`, in an order that depends on the
+/// error, and the rich value only stands in for the #VALUE! the cell caches.
+#[test]
+fn reads_the_error_among_other_keys_and_only_over_its_fallback() {
+    let mut parts = independent_parts(false);
+    replace(
+        &mut parts,
+        "sheets/data.xml",
+        "</sheetData>",
+        r#"<row r="3"><c r="A3" t="e" vm="3"><v>#VALUE!</v></c><c r="B3" t="e" vm="3"><v>#N/A</v></c><c r="C3" vm="3"><v>5</v></c><c r="D3" t="e" vm="4"><v>#VALUE!</v></c><c r="E3" t="e" vm="5"><v>#VALUE!</v></c></row></sheetData>"#,
+    );
+    let block = |i: u32| format!(r#"<bk><extLst><ext uri="{{3E2802C4-A4D2-4D8B-9148-E3BE6C30E623}}"><rv:rvb i="{i}"/></ext></extLst></bk>"#);
+    replace(
+        &mut parts,
+        "meta/state.xml",
+        "</futureMetadata><cellMetadata",
+        &format!("{}{}{}</futureMetadata><cellMetadata", block(2), block(3), block(4)),
+    );
+    replace(
+        &mut parts,
+        "meta/state.xml",
+        "</valueMetadata>",
+        r#"<bk><rc t="2" v="2"/></bk><bk><rc t="2" v="3"/></bk><bk><rc t="2" v="4"/></bk></valueMetadata>"#,
+    );
+    replace(
+        &mut parts,
+        "rich/values.xml",
+        "</rvData>",
+        "<rv s=\"2\"><v>1</v><v>8</v><v>3</v><v>0</v></rv><rv s=\"2\"><v>0</v><v>99</v><v>0</v><v>0</v></rv><rv s=\"2\"><v>0</v><v>13</v><v>0</v><v>0</v></rv></rvData>",
+    );
+    replace(
+        &mut parts,
+        "rich/structures.xml",
+        "</rvStructures>",
+        r#"<s t="_error"><k n="colOffset" t="i"/><k n="errorType" t="i"/><k n="rwOffset" t="i"/><k n="subType" t="i"/></s></rvStructures>"#,
+    );
+    let (wb, report) = read_xlsx(&zip(&parts)).unwrap();
+    let sheet = wb.sheet(0).unwrap();
+    assert_eq!(sheet.value(at("A3")), Value::Error(CellError::Spill));
+    assert_eq!(sheet.value(at("B3")), Value::Error(CellError::NA), "a cached error other than the fallback stays");
+    assert_eq!(sheet.value(at("C3")), Value::Number(5.0), "a cached number stays");
+    assert_eq!(sheet.value(at("D3")), Value::Error(CellError::Value), "an error type GridCraft doesn't keep stays the fallback");
+    assert_eq!(sheet.value(at("E3")), Value::Error(CellError::Calc));
+    assert!(sheet.cell_pictures.contains_key(&at("A1")) && sheet.cell_pictures.len() == 1);
+    assert!(report.warnings.iter().any(|w| w.contains("unsupported or malformed")), "{:?}", report.warnings);
+}

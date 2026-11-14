@@ -785,6 +785,13 @@ fn write_cell(s: &mut String, input: CellWriteInput<'_>, sid: &dyn Fn(gridcraft_
         Value::Array(a) => a.get(0, 0).cloned().unwrap_or(Value::Empty),
         v => v,
     };
+    // A typed #SPILL! or #CALC! (pasted as a value, loaded by a query) has no formula to give
+    // it back, so it is saved as Excel saves one: the #VALUE! fallback, and value metadata that
+    // points at a rich value naming the error. A formula's cached error is recalculated instead.
+    let rich_error = match &value {
+        Value::Error(e) if formula.is_none() && py_text.is_none() && ov.is_none() && extra.is_none() => out.cell_pictures.error_index(*e),
+        _ => None,
+    };
     let value = match value {
         Value::Error(CellError::Circ) => Value::Number(0.0),
         // #SPILL! and #CALC! are not error codes of the file format (Excel refuses a file that
@@ -854,9 +861,14 @@ fn write_cell(s: &mut String, input: CellWriteInput<'_>, sid: &dyn Fn(gridcraft_
         Value::Bool(b) => {
             let _ = write!(s, " t=\"b\"><v>{}</v></c>", *b as u8);
         }
-        Value::Error(e) => {
-            let _ = write!(s, " t=\"e\"><v>{}</v></c>", e.as_str());
-        }
+        Value::Error(e) => match rich_error {
+            Some(vm) => {
+                let _ = write!(s, " t=\"e\" vm=\"{vm}\"><v>{}</v></c>", e.as_str());
+            }
+            None => {
+                let _ = write!(s, " t=\"e\"><v>{}</v></c>", e.as_str());
+            }
+        },
     }
 }
 

@@ -42,6 +42,10 @@ const SAMPLES: [&str; 3] = ["sales", "budget", "grades"];
 /// Episodes end (undo/redo checks, then a fresh history) before the engine's 100-step undo limit
 /// starts dropping the oldest entries.
 const EPISODE_UNDO_DEPTH: usize = 90;
+/// Episodes also end before the engine's 128 MiB budget for what the undo history retains starts
+/// dropping the oldest entries. One step on a sheet with tens of thousands of cells in the same
+/// block of rows retains a few megabytes, so half the budget leaves room for the next step.
+const EPISODE_UNDO_BYTES: usize = 64 * 1024 * 1024;
 /// Save and reload every this many steps (and at the end of every episode).
 const ROUNDTRIP_EVERY: usize = 10;
 /// The hidden defined name `formulas.watchWindow` keeps its list in.
@@ -273,7 +277,9 @@ impl Harness {
         if (i + 1).is_multiple_of(ROUNDTRIP_EVERY) {
             guarded(i, "xlsx roundtrip", || roundtrip_diff(&after))?;
         }
-        if self.s.doc().expect("document").undo.len() >= EPISODE_UNDO_DEPTH {
+        let undo = &self.s.doc().expect("document").undo;
+        let retained = undo.iter().fold(0usize, |sum, entry| sum.saturating_add(entry.retained_bytes));
+        if undo.len() >= EPISODE_UNDO_DEPTH || retained >= EPISODE_UNDO_BYTES {
             self.end_episode(i)?;
         }
         Ok(())
@@ -293,6 +299,7 @@ impl Harness {
     /// and reload; the next episode starts from here with an empty history.
     fn end_episode(&mut self, i: usize) -> Result<(), Failure> {
         let end = self.wb();
+        let redoable = self.s.doc().expect("document").redo.len();
         let mut n = 0;
         while !self.s.doc().expect("document").undo.is_empty() {
             if let Err(EngineError::Internal(_, msg)) = self.s.execute("edit.undo", json!({})) {
@@ -311,13 +318,17 @@ impl Harness {
             return Err(fail(i, "undo", format!("undoing all {n} steps changed the Watch Window list (not an edit)")));
         }
         self.check_state(i)?;
+        // The redo history has the same byte budget as the undo history, and one undone step can
+        // retain most of it (a border down a whole column makes a million cells). The steps it
+        // dropped can't be redone, so the final workbook is out of reach and isn't compared.
+        let all_kept = self.s.doc().expect("document").redo.len() >= redoable + n;
         // Only the steps undone here: an `edit.undo {steps}` in the sequence may have left more.
         for _ in 0..n {
             if let Err(EngineError::Internal(_, msg)) = self.s.execute("edit.redo", json!({})) {
                 return Err(fail(i, "panic", format!("`edit.redo` panicked while redoing everything: {msg}")));
             }
         }
-        if let Some(diff) = workbook_diff(&end, &self.wb()) {
+        if all_kept && let Some(diff) = workbook_diff(&end, &self.wb()) {
             return Err(fail(i, "redo", format!("redoing all {n} steps doesn't give back the final workbook: {diff}")));
         }
         self.check_state(i)?;
@@ -1134,4 +1145,28 @@ fn view_mode_switch_is_not_an_undo_difference() {
         let failure = replay("sales", &[(id.to_string(), json!({"sheet": 0}))]);
         assert!(failure.is_none(), "`{id}`: {failure:?}");
     }
+}
+
+/// Seed 156: the undo history is also bounded by the bytes it retains, and a sheet with tens of
+/// thousands of cells in one block of rows retains megabytes per step, so a few dozen steps reach
+/// that budget long before the step limit. An episode ends before the oldest steps are dropped;
+/// otherwise undoing everything can't give back the workbook the episode started from.
+#[test]
+fn an_episode_ends_before_the_undo_byte_budget_drops_steps() {
+    let mut steps: Vec<Step> = vec![("home.borders".to_string(), json!({"preset": "all", "range": "19:21"}))];
+    steps.extend((0..60).map(|i| ("cell.set".to_string(), json!({"cell": "J2", "input": i.to_string()}))));
+    let failure = replay("sales", &steps);
+    assert!(failure.is_none(), "{failure:?}");
+}
+
+/// Seed 91: undoing a step that made a million cells retains most of the redo history's byte
+/// budget, so the step undone before it is dropped and redoing can't reach the final workbook.
+#[test]
+fn a_redo_step_the_byte_budget_dropped_is_not_a_redo_difference() {
+    let steps = [
+        ("home.borders".to_string(), json!({"preset": "outside", "range": "I:I"})),
+        ("home.deleteCells".to_string(), json!({"range": "E12:G14", "shift": "column"})),
+    ];
+    let failure = replay("budget", &steps);
+    assert!(failure.is_none(), "{failure:?}");
 }

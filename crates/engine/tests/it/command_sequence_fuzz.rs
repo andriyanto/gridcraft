@@ -300,6 +300,11 @@ impl Harness {
     fn end_episode(&mut self, i: usize) -> Result<(), Failure> {
         let end = self.wb();
         let redoable = self.s.doc().expect("document").redo.len();
+        // One step can retain more than the whole byte budget (deleting rows of a sheet with
+        // over a million cells), and the history then drops every step before it at once. Its
+        // oldest step no longer starts from this episode's workbook, so undoing everything
+        // can't give that workbook back and it isn't compared.
+        let start_kept = self.s.doc().expect("document").undo.first().is_none_or(|oldest| Arc::ptr_eq(&oldest.wb, &self.base));
         let mut n = 0;
         while !self.s.doc().expect("document").undo.is_empty() {
             if let Err(EngineError::Internal(_, msg)) = self.s.execute("edit.undo", json!({})) {
@@ -311,7 +316,7 @@ impl Harness {
             }
         }
         let undone = self.wb();
-        if let Some(diff) = workbook_diff(&self.base, &undone) {
+        if start_kept && let Some(diff) = workbook_diff(&self.base, &undone) {
             return Err(fail(i, "undo", format!("undoing all {n} steps doesn't give back the starting workbook: {diff}")));
         }
         if watch_list(&end) != watch_list(&undone) {
@@ -1166,6 +1171,20 @@ fn a_redo_step_the_byte_budget_dropped_is_not_a_redo_difference() {
     let steps = [
         ("range.fill".to_string(), json!({"input": "1", "range": "I:I"})),
         ("home.deleteCells".to_string(), json!({"range": "E12:G14", "shift": "column"})),
+    ];
+    let failure = replay("budget", &steps);
+    assert!(failure.is_none(), "{failure:?}");
+}
+
+/// Seed 93: one step on a sheet with well over a million cells retains more than the whole byte
+/// budget, so the undo history drops every step before it at once and undoing everything can't
+/// reach the workbook the episode started from.
+#[test]
+fn undo_steps_one_huge_step_pushed_out_are_not_an_undo_difference() {
+    let steps = [
+        ("cell.set".to_string(), json!({"cell": "H2", "input": "kept"})),
+        ("range.fill".to_string(), json!({"input": "1", "range": "I1:J800000"})),
+        ("home.deleteRows".to_string(), json!({"rows": "2:3"})),
     ];
     let failure = replay("budget", &steps);
     assert!(failure.is_none(), "{failure:?}");

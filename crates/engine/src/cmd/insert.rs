@@ -412,9 +412,40 @@ fn find_table(s: &Session, p: &Json) -> Result<(usize, usize)> {
     Ok((sheet, ti))
 }
 
+/// The cells right below table `ti` that its total row would take, when something is in them:
+/// content, a merged area or another table. `None` when the row is free or off the sheet.
+fn total_row_taken(sh: &Sheet, ti: usize) -> Option<RangeRef> {
+    let t = sh.tables.get(ti)?;
+    let row = t.range.end.row.checked_add(1).filter(|r| *r < MAX_ROWS)?;
+    let below = RangeRef::new(CellRef::new(row, t.range.start.col), CellRef::new(row, t.range.end.col));
+    let taken = sh.cells.iter_range(below).any(|(_, x)| x.has_content())
+        || sh.merges.iter().any(|m| m.intersects(&below))
+        || sh.tables.iter().enumerate().any(|(i, o)| i != ti && o.range.intersects(&below));
+    taken.then_some(below)
+}
+
 fn table_flag(s: &mut Session, p: &Json, which: &str) -> Result<Json> {
     let (si, ti) = find_table(s, p)?;
     let on = bool_param(p, "on");
+    if which == "totals" {
+        let sh = s.doc()?.wb.sheet(si).ok_or(EngineError::NoDocument)?;
+        let turning_on = sh.tables.get(ti).is_some_and(|t| !t.totals_row && on.unwrap_or(true));
+        // The total row takes the row below the table. Writing it over what is there would lose
+        // that data, or leave two tables sharing cells, so what is in the way moves down first,
+        // as Insert Cells does; when it can't move, the total row is refused and nothing changes.
+        if turning_on && let Some(below) = total_row_taken(sh, ti) {
+            let name = sh.tables.get(ti).map(|t| t.name.clone()).unwrap_or_default();
+            return s.grouped("Total Row", |s| {
+                s.execute("home.insertCells", json!({"range": below.a1(), "shift": "down", "sheet": si}))?;
+                let (si, ti) = s.doc()?.wb.table(&name).ok_or_else(|| bad("table", format!("no table named `{name}`")))?;
+                set_table_flag(s, si, ti, on, which)
+            });
+        }
+    }
+    set_table_flag(s, si, ti, on, which)
+}
+
+fn set_table_flag(s: &mut Session, si: usize, ti: usize, on: Option<bool>, which: &str) -> Result<Json> {
     edit(s, |cx| {
         let sh = cx.sheet_mut(si)?;
         let Some(t) = sh.tables.get_mut(ti) else { return Ok(Json::Null) };

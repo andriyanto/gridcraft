@@ -2880,3 +2880,56 @@ fn formulas_read_a_dirty_python_cell_after_it_is_laid_out() {
     assert_eq!((t.num("B1"), t.num("B2")), (5.0, 6.0));
     assert_eq!((t.num("A1"), t.num("A2"), t.num("A3")), (5.0, 100.0, 111.0));
 }
+
+/// A column of lookups and criteria counts reads its table once for the whole recalculation
+/// (the formulas share one array of it). Each formula still gets what it gets evaluated on its
+/// own, also when the table changes and when an array spills into it partway through.
+#[test]
+fn formulas_sharing_a_range_get_what_each_gets_alone() {
+    let mut t = T::new();
+    for r in 1..=60u32 {
+        t.set(&format!("A{r}"), &format!("{}", (r * 7) % 20));
+        t.set(&format!("B{r}"), if r % 3 == 0 { "x" } else { "Y" });
+        t.set(&format!("C{r}"), &format!("{}", r * 10));
+    }
+    let formulas = [
+        "=VLOOKUP(MOD(ROW()*3,20),$A$1:$C$60,3,FALSE)",
+        "=MATCH(MOD(ROW(),25),$A$1:$A$60,0)",
+        "=XLOOKUP(MOD(ROW(),20),$A$1:$A$60,$C$1:$C$60,\"none\",0,-1)",
+        "=COUNTIF($A$1:$A$60,MOD(ROW(),20))",
+        "=COUNTIF($B$1:$B$60,IF(MOD(ROW(),2)=0,\"X\",\"y\"))",
+        "=SUMIFS($C$1:$C$60,$A$1:$A$60,MOD(ROW(),20),$B$1:$B$60,\"y\")",
+        "=SUMIF($A$1:$A$60,\">\"&MOD(ROW(),5),$C$1:$C$60)",
+        "=COUNTIF($H$1:$I$40,ROW()*2)",
+    ];
+    let columns = ["E", "F", "G", "K", "L", "M", "N", "O"];
+    for r in 1..=40u32 {
+        for (col, f) in columns.iter().zip(formulas) {
+            let at = format!("{col}{r}");
+            t.wb.sheet_mut(0).unwrap().cells.set(c(&at), Cell::formula(Formula::new(f)));
+        }
+    }
+    // An array that spills over H1:I40, which the formulas left of it (columns E to G) read
+    // before it is calculated and the ones right of it after.
+    t.wb.sheet_mut(0).unwrap().cells.set(c("H1"), Cell::formula(Formula::new("=SEQUENCE(40,2)")));
+    let check = |t: &T, when: &str| {
+        for r in 1..=40u32 {
+            for (col, f) in columns.iter().zip(formulas) {
+                let at = format!("{col}{r}");
+                let alone = crate::recalc::evaluate(&t.wb, 0, c(&at), f);
+                assert_eq!(t.get(&at), alone, "{at} {f} {when}");
+            }
+        }
+    };
+    t.calc.recalc_all(&mut t.wb);
+    assert_eq!(t.num("O3"), 1.0, "the spilled 6 is counted");
+    check(&t, "after a full recalculation");
+    // An edit inside the table recalculates its readers, again from one shared array.
+    t.set("A7", "3");
+    t.set("B9", "y");
+    check(&t, "after edits in the table");
+    // The array moves away: its readers see the cells empty.
+    t.set("H1", "");
+    assert_eq!(t.num("O3"), 0.0);
+    check(&t, "after the array is gone");
+}

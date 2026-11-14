@@ -81,6 +81,17 @@ pub(super) struct PassHost<'a> {
     /// cell and last column; each value maps a last row to the block's result (`None`: the block
     /// has a formula, a Python cell, an error value or a spilled value, so every longer one has too).
     sums: HashMap<(usize, CellRef, u32), BlockSums>,
+    /// Blocks read as arrays more than once in the pass, each read into one array that every
+    /// later read shares (see [`PassHost::range_array`]), and the blocks read once so far.
+    arrays: HashMap<(usize, RangeRef), std::sync::Arc<Array>>,
+    read_once: HashSet<(usize, RangeRef)>,
+    /// Cells held by `arrays`, against [`MAX_SHARED_CELLS`].
+    shared_cells: usize,
+    /// How many reads so far gave a value that is not the cell's value for the pass: a formula
+    /// in progress (a circular reference) or an evaluation being abandoned.
+    unsettled: u64,
+    /// What the functions remember between calls.
+    memo: gridcraft_functions::Memo,
     /// The spill areas the sheet holds for the formulas being evaluated, innermost last: what a
     /// formula spilled last time is its own result, so reading it is a circular reference.
     own_areas: Vec<(Key, RangeRef)>,
@@ -125,6 +136,11 @@ impl<'a> PassHost<'a> {
             stack_top: 0,
             out_of_stack: false,
             sums: HashMap::default(),
+            arrays: HashMap::default(),
+            read_once: HashSet::default(),
+            shared_cells: 0,
+            unsettled: 0,
+            memo: gridcraft_functions::Memo::new(),
             own_areas: Vec::new(),
             python: HashMap::default(),
         }
@@ -138,6 +154,11 @@ impl<'a> PassHost<'a> {
         self
     }
 }
+
+/// Smallest block kept as a shared array: reading fewer cells again costs less than keeping them.
+const MIN_SHARED_CELLS: usize = 32;
+/// Most cells the shared arrays of one pass hold; past it blocks are read each time, as before.
+const MAX_SHARED_CELLS: usize = 8_000_000;
 
 /// Most spill areas a range read meets before they are checked for overlapping one another by
 /// walking all of the pass's spills instead of comparing pairs.
@@ -243,8 +264,19 @@ impl PassHost<'_> {
         self.own_areas.iter().rev().find(|(k, r)| k.0 == sheet && k.1 != c && r.contains(c)).map(|(k, _)| *k)
     }
 
+    /// Drops the shared arrays: an array found in the pass spills over cells they may hold.
+    fn forget_arrays(&mut self) {
+        if !self.arrays.is_empty() {
+            self.arrays.clear();
+            self.shared_cells = 0;
+            // What the functions noted was about those arrays, and keeps them alive.
+            self.memo = gridcraft_functions::Memo::new();
+        }
+    }
+
     /// Lists `k` among the circular references, once.
     fn note_cycle(&mut self, k: Key) {
+        self.unsettled += 1;
         self.cycle = true;
         if self.cycle_seen.insert(k) {
             self.cycles.push(k);
@@ -310,6 +342,7 @@ impl PassHost<'_> {
             return self.wb.sheet(k.0).map(|s| s.value(k.1)).unwrap_or_default();
         };
         if self.suspend.is_some() {
+            self.unsettled += 1;
             // Unwinding to `calculate`: the value is thrown away. A formula read at the limit is
             // calculated with the suspended one, so the evaluations are not restarted for each.
             if self.depth >= MAX_NESTED && !self.in_progress.contains(&k) && !self.waiting.contains(&k) {
@@ -318,6 +351,7 @@ impl PassHost<'_> {
             return Value::Error(CellError::Calc);
         }
         if self.in_progress.contains(&k) || self.waiting.contains(&k) {
+            self.unsettled += 1;
             self.cycle = true;
             if self.iterate {
                 return self.circular_read(k);
@@ -329,6 +363,7 @@ impl PassHost<'_> {
             return Value::Error(CellError::Circ);
         }
         if self.depth >= MAX_NESTED {
+            self.unsettled += 1;
             self.suspend = Some(k);
             return Value::Error(CellError::Calc);
         }
@@ -355,6 +390,9 @@ impl PassHost<'_> {
             self.own_areas.pop();
         }
         let out_of_stack = std::mem::replace(&mut self.out_of_stack, outer_out_of_stack);
+        if out_of_stack || self.suspend.is_some() {
+            self.unsettled += 1;
+        }
         if out_of_stack && self.depth > 1 && self.suspend.is_none() {
             // It ran out of the stack left below the formulas that read it: it is calculated
             // from the top instead, as a formula needed at `MAX_NESTED` levels deep is.
@@ -431,6 +469,7 @@ impl PassHost<'_> {
                 // returns a scalar never reaches this arm, so it does not become an anchor.
                 self.spill_index.insert(k, a.rows, a.cols);
                 self.spills.insert(k, a.clone());
+                self.forget_arrays();
                 a.data.first().cloned().unwrap_or_default()
             }
             Value::Empty => Value::Number(0.0),
@@ -466,6 +505,7 @@ impl PassHost<'_> {
                 if sane {
                     self.spill_index.insert(k, a.rows, a.cols);
                     self.spills.insert(k, a.clone());
+                    self.forget_arrays();
                     a.data.first().cloned().unwrap_or_default()
                 } else {
                     Value::Error(CellError::Spill)
@@ -732,6 +772,40 @@ impl Host for PassHost<'_> {
             }
         }
         out
+    }
+    /// From the second read of a block on, one array for every formula that reads it. A value
+    /// in it is the cell's value for the whole pass: a formula's result doesn't change once it
+    /// is calculated, an array found later drops what is kept ([`Self::forget_arrays`]), and a
+    /// read that met a formula in progress or an abandoned evaluation is not kept. Iterative
+    /// calculation, where values change from pass to pass, keeps none.
+    fn range_array(&mut self, sheet: usize, range: RangeRef) -> Option<std::sync::Arc<Array>> {
+        let key = (sheet, range);
+        if let Some(a) = self.arrays.get(&key) {
+            return Some(std::sync::Arc::clone(a));
+        }
+        let (h, w) = (range.height() as usize, range.width() as usize);
+        let cells = h.checked_mul(w)?;
+        if self.iterate || cells < MIN_SHARED_CELLS || self.shared_cells.saturating_add(cells) > MAX_SHARED_CELLS {
+            return None;
+        }
+        if self.read_once.insert(key) {
+            return None;
+        }
+        let before = self.unsettled;
+        let data = self.range_values(sheet, range);
+        let array = std::sync::Arc::new(Array::new(h, w, data)?);
+        // Reading the block calculated the formulas in it, which may have found arrays (and
+        // dropped what was kept); the block itself is read after them, so it is still right.
+        if self.unsettled == before && self.suspend.is_none() {
+            self.shared_cells = self.shared_cells.saturating_add(cells);
+            self.arrays.insert(key, std::sync::Arc::clone(&array));
+        }
+        Some(array)
+    }
+    fn memo(&mut self) -> Option<&mut gridcraft_functions::Memo> {
+        // Iterative calculation evaluates a formula again with other values in the same arrays'
+        // places, never in the same array: the functions' notes stay true, but nothing is shared.
+        Some(&mut self.memo)
     }
     fn visit_range(&mut self, sheet: usize, range: RangeRef, f: &mut dyn FnMut(&Value) -> bool) -> bool {
         let wb = self.wb;

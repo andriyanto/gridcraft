@@ -73,12 +73,14 @@ pub(crate) mod info;
 pub(crate) mod lift;
 pub(crate) mod lookup;
 pub(crate) mod math;
+pub(crate) mod memo;
 pub(crate) mod special;
 pub(crate) mod stat;
 pub(crate) mod text;
 pub(crate) mod util;
 
 pub use ets::Timeline;
+pub use memo::Memo;
 pub use stat::{aggregate_values, aggregate_values_k};
 
 /// An evaluated argument. Ranges arrive as `Value::Array` (blank cells = `Value::Empty`) with
@@ -123,6 +125,11 @@ pub trait Ctx {
     /// Calls that LAMBDA with `arg` (one group's values) and returns its single result; `None` when
     /// there is no lambda.
     fn call_lambda(&mut self, _arg: Value) -> Option<Value> {
+        None
+    }
+    /// What this recalculation remembers between calls ([`Memo`]); `None` when nothing is kept
+    /// (one formula evaluated on its own).
+    fn memo(&mut self) -> Option<&mut Memo> {
         None
     }
 }

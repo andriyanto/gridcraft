@@ -149,6 +149,10 @@ const SHARED_FORMULA_FREE_COST: u64 = 4096;
 /// file's bytes, and this bounds it to well within a web build's memory.
 pub const MAX_SHARED_FORMULA_BYTES: u64 = 256 << 20;
 const MAX_COLUMN_ASSIGNMENTS: u64 = 1_000_000;
+/// Most merged ranges kept from one sheet. Merge Across on whole columns makes one per row
+/// (1,048,576), and a sheet can have a few such blocks side by side; a part of nothing but
+/// `mergeCell` elements could otherwise fill memory within the package byte limit.
+const MAX_MERGES: usize = 4 * 1_048_576;
 /// Most dynamic-array and legacy-array ranges of one sheet.
 const MAX_DYNAMIC_RANGES: usize = 65_536;
 /// Worst-case cells inside the dynamic ranges the sheet declares. Beyond it further ranges are
@@ -188,8 +192,15 @@ pub fn read_sheet(cx: &mut Ctx<'_>, part: &str, name: &str) -> Result<(Sheet, cr
     let rels = cx.pkg.rels(part)?;
     let mut sheet = Sheet::new(name);
     let mut st = RowState::default();
-    let res = xml::parse_streaming(&bytes, &["row"], &mut |row| {
-        read_row(cx, &mut sheet, &mut st, &row);
+    // Rows and merged ranges are streamed: a sheet may hold more of either than a parsed tree may
+    // hold elements (Merge Across on whole columns makes one merged range per row, 1,048,576).
+    let mut merges_dropped = 0u64;
+    let res = xml::parse_streaming(&bytes, &["row", "mergeCell"], &mut |el| {
+        if el.name == "mergeCell" {
+            read_merge(&mut sheet, &el, &mut merges_dropped);
+        } else {
+            read_row(cx, &mut sheet, &mut st, &el);
+        }
         Ok(())
     });
     let root = match res {
@@ -199,6 +210,9 @@ pub fn read_sheet(cx: &mut Ctx<'_>, part: &str, name: &str) -> Result<(Sheet, cr
             El::default()
         }
     };
+    if merges_dropped > 0 {
+        cx.warn(format!("sheet \"{name}\": merged ranges past {MAX_MERGES} were dropped ({merges_dropped})"));
+    }
     if st.dropped > 0 {
         cx.warn(format!("sheet \"{name}\": {} cells or rows outside the 1,048,576 × 16,384 grid were dropped", st.dropped));
     }
@@ -225,15 +239,6 @@ pub fn read_sheet(cx: &mut Ctx<'_>, part: &str, name: &str) -> Result<(Sheet, cr
             "sheetViews" => read_views(e, &mut sheet),
             "sheetFormatPr" => read_sheet_format(e, &mut sheet),
             "cols" => read_cols(cx, e, &mut sheet, &mut column_assignments_left)?,
-            "mergeCells" => {
-                for m in e.kids("mergeCell") {
-                    if let Some(r) = m.attr("ref").and_then(RangeRef::parse)
-                        && !r.is_single()
-                    {
-                        sheet.merges.push(r);
-                    }
-                }
-            }
             "conditionalFormatting" => read_cf(cx, e, &mut sheet, &mut cf_kept_cells),
             "dataValidations" => {
                 for v in e.kids("dataValidation") {
@@ -489,6 +494,17 @@ fn read_cols(cx: &Ctx<'_>, e: &El, sheet: &mut Sheet, remaining: &mut u64) -> Re
         }
     }
     Ok(())
+}
+
+/// One `mergeCell` of the sheet, streamed with the rows. Past [`MAX_MERGES`] they are counted in
+/// `dropped` instead of kept.
+fn read_merge(sheet: &mut Sheet, m: &El, dropped: &mut u64) {
+    let Some(r) = m.attr("ref").and_then(RangeRef::parse).filter(|r| !r.is_single()) else { return };
+    if sheet.merges.len() < MAX_MERGES {
+        sheet.merges.push(r);
+    } else {
+        *dropped = dropped.saturating_add(1);
+    }
 }
 
 fn read_row(cx: &mut Ctx<'_>, sheet: &mut Sheet, st: &mut RowState, row: &El) {

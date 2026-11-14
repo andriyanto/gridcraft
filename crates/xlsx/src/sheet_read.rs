@@ -619,17 +619,23 @@ fn read_cell(cx: &mut Ctx<'_>, sheet: &mut Sheet, st: &mut RowState, c: &El, pos
             None => Value::Empty,
         },
     };
-    let picture = c.attr("vm").and_then(|vm| {
+    let rich = c.attr("vm").and_then(|vm| {
         if vm == "0" {
             return None;
         }
-        let picture = vm.parse::<usize>().ok().and_then(|n| n.checked_sub(1)).and_then(|n| cx.cell_pictures.get(n)).cloned().flatten();
-        if picture.is_none() {
+        let rich = vm.parse::<usize>().ok().and_then(|n| n.checked_sub(1)).and_then(|n| cx.cell_pictures.get(n)).cloned().flatten();
+        if rich.is_none() {
             cx.warn("some cells have unsupported or missing value metadata; kept their scalar fallback (cell pictures may be missing)");
         }
-        picture
+        rich
     });
-    if let Some(picture) = picture {
+    // An error the format has no code for is cached as #VALUE!, and the rich value names it.
+    // Only that fallback is replaced: metadata never turns another cached value into an error.
+    let value = match (&rich, value) {
+        (Some(crate::richdata::RichValue::Error(error)), Value::Error(CellError::Value)) => Value::Error(*error),
+        (_, value) => value,
+    };
+    if let Some(crate::richdata::RichValue::Picture(picture)) = rich {
         if c.child("f").is_some() {
             cx.warn("formula-generated cell pictures were imported as static pictures; their formulas were not retained");
         }

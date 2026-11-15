@@ -336,6 +336,16 @@ impl<'h> Evaluator<'h> {
                     ev = Ev::R(vec![Area { sheet: area.sheet, range: resized_sum_range(area.range, h, w) }]);
                 }
             }
+            // A reference to more than one cell is `#VALUE!` at a value parameter whatever the
+            // cells hold (`gridcraft_functions` rejects the array it would give). It is refused
+            // here, by its size: a whole column is cut down to its filled cells when it is read,
+            // and an empty one is left with a single cell.
+            if spec.is_value_arg(i)
+                && let Ev::R(areas) = &ev
+                && (areas.len() > 1 || areas.iter().any(|area| area.range.count() > 1))
+            {
+                ev = Ev::V(Value::Error(CellError::Value));
+            }
             let from_ref = matches!(ev, Ev::R(_));
             let value = match ev {
                 Ev::R(areas) if areas.len() > 1 => {

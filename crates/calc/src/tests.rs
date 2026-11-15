@@ -1366,6 +1366,8 @@ fn subtotal_109_skips_nested_subtotal() {
 fn subtotal_and_aggregate_cap_cells_visited() {
     let mut t = T::new();
     t.set("XFD1048576", "1");
+    // Whole columns are cut down to the last filled row of the columns the formula reads.
+    t.set("T1048576", "1");
     let formulas = [
         "=SUBTOTAL(9,A:XFD)",
         "=SUBTOTAL(109,1:1048576)",

@@ -1,6 +1,6 @@
 # Architecture
 
-> **Last reviewed:** 2026-10-10 · **Last updated:** 2026-11-15 · **Change:** minor (hiding and filtering rows recalculates only what depends on hidden rows; earlier: cell store rows shared one by one; earlier: shared CJK fallback baselines; earlier: Python mode in the formula bar; earlier: Python cells as data; earlier: equations: the `math` crate and the layout cache; earlier: recently used functions kept in the preferences; Function Library module; accent icons; earlier: the hidden names that hold macros) · **Target:** Microsoft Excel (Microsoft 365)
+> **Last reviewed:** 2026-10-10 · **Last updated:** 2026-11-15 · **Change:** minor (whole columns read as an array are bounded by the formula's own references; earlier: hiding and filtering rows recalculates only what depends on hidden rows; earlier: cell store rows shared one by one; earlier: shared CJK fallback baselines; earlier: Python mode in the formula bar; earlier: Python cells as data; earlier: equations: the `math` crate and the layout cache; earlier: recently used functions kept in the preferences; Function Library module; accent icons; earlier: the hidden names that hold macros) · **Target:** Microsoft Excel (Microsoft 365)
 
 How GridCraft is built today. Rules for contributors are in [`AGENTS.md`](../AGENTS.md).
 
@@ -243,6 +243,7 @@ rpm, tarball), FreeBSD, and web (WASM; WebGPU or WebGL2). Release workflows in
 
 | Date | Change | Summary |
 |---|---|---|
+| 2026-11-15 | minor | Recalculation: a whole column or row read as an array is cut down by `Host::trim_end`. During a recalculation the bound comes from the filled cells of the formula's own whole-column and whole-row references, so every cell that can move it is one the dependency graph already tracks for that formula; the sheet's used range, which it came from before, changes without the formula being recalculated. |
 | 2026-11-15 | minor | Recalculation: hiding, showing, grouping and filtering rows, and setting a row's height, recalculate only the formulas that call `SUBTOTAL` or `AGGREGATE` and what reads them, instead of every formula in the workbook (`Calc::rows_shown_or_hidden`). |
 | 2026-11-15 | minor | Cell store: each row of a band sits behind its own `Arc`. An edit copies the cell's row instead of its 64-row band, and rows moved whole by a row insert or delete stay shared with the undo snapshot, so an undo step retains kilobytes where it retained megabytes. |
 | 2026-11-02 | minor | Python mode in the formula bar: Python mode on the shared editor, `code_field` and its stop keys; drafts follow their sheet by `model::SheetUid` |

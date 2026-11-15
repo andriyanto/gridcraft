@@ -16,7 +16,7 @@ use gridcraft_core::{Array, CellError, CellRef, RangeRef, Value};
 use gridcraft_formula::Expr;
 use gridcraft_model::{CalcMode, Workbook};
 
-use crate::eval::{Evaluator, Host, precedents, stack_position};
+use crate::eval::{Evaluator, Host, precedents, reads_hidden_rows, stack_position};
 use crate::spill_index::{SpillIndex, indexing_pays};
 
 /// Changed cells (in one `cells_changed`) from which a sheet's spill areas may be indexed.
@@ -53,6 +53,11 @@ pub struct Calc {
     /// `rebuild`, kept up to date by `cells_changed` and by the write-back of a run; an entry is
     /// always checked against the workbook before it is used.
     spill_errors: SpillErrors,
+    /// The formulas whose result depends on which rows are hidden or filtered out (they call
+    /// SUBTOTAL or AGGREGATE). Hiding or showing rows changes no cell, so nothing in the graph
+    /// leads to them; `rows_shown_or_hidden` starts from this set. Filled in `rebuild`, kept up
+    /// to date by `cells_changed`.
+    hidden_row_readers: HashSet<Key>,
 }
 
 /// A set of cells by row, each row's columns in their own set: a window of rows and columns is
@@ -102,6 +107,7 @@ impl Default for Calc {
             circular: vec![],
             last_recalc_cells: 0,
             spill_errors: SpillErrors::default(),
+            hidden_row_readers: HashSet::default(),
         }
     }
 }
@@ -187,15 +193,22 @@ impl Calc {
         self.graph = Graph::default();
         let mut circ = Vec::new();
         self.spill_errors.clear();
+        self.hidden_row_readers.clear();
         for (si, sheet) in wb.sheets.iter().enumerate() {
             for (c, cell) in sheet.cells.iter() {
                 if cell.value == Value::Error(CellError::Spill) {
                     self.spill_errors.insert((si, c));
                 }
                 if let Some(f) = &cell.formula
-                    && let Some((areas, dynamic)) = f.with_expr(|e| precedents(wb, si, e))
+                    && let Some((areas, dynamic, hidden_rows)) = f.with_expr(|e| {
+                        let (areas, dynamic) = precedents(wb, si, e);
+                        (areas, dynamic, reads_hidden_rows(e))
+                    })
                 {
                     self.graph.insert((si, c), Node { areas, dynamic });
+                    if hidden_rows {
+                        self.hidden_row_readers.insert((si, c));
+                    }
                     if cell.value == Value::Error(CellError::Circ) {
                         circ.push((si, c));
                     }
@@ -290,6 +303,28 @@ impl Calc {
 
     /// Updates the graph for cells whose content changed and recalculates what depends on them.
     pub fn cells_changed(&mut self, wb: &mut Workbook, changed: &[Key]) {
+        self.cells_changed_and(wb, changed, &[]);
+    }
+
+    /// Recalculates after rows were hidden, shown or filtered out, when nothing else changed but
+    /// the cells in `changed`: the formulas whose result depends on hidden rows (SUBTOTAL,
+    /// AGGREGATE), everything that reads them, and what `cells_changed` recalculates for
+    /// `changed`. No cell moved and no formula changed, so the graph stands as it is and the
+    /// other formulas keep their values; a full recalculation would give them the same ones.
+    ///
+    /// In manual calculation mode everything is recalculated, as such an edit always did.
+    pub fn rows_shown_or_hidden(&mut self, wb: &mut Workbook, changed: &[Key]) {
+        if wb.calc.mode == CalcMode::Manual {
+            self.recalc_all(wb);
+            return;
+        }
+        let mut readers: Vec<Key> = self.hidden_row_readers.iter().copied().collect();
+        readers.sort_unstable_by_key(|(sheet, c)| (*sheet, c.row, c.col));
+        self.cells_changed_and(wb, changed, &readers);
+    }
+
+    /// `cells_changed`, with `also` recalculated as well (formulas, and with them what reads them).
+    fn cells_changed_and(&mut self, wb: &mut Workbook, changed: &[Key], also: &[Key]) {
         let mut cleared: Vec<(usize, RangeRef)> = Vec::new();
         for &k in changed {
             if wb.sheet(k.0).and_then(|s| s.cell(k.1)).is_some_and(|c| c.value == Value::Error(CellError::Spill)) {
@@ -297,8 +332,13 @@ impl Calc {
             } else {
                 self.spill_errors.remove(&k);
             }
-            let precedent =
-                wb.sheet(k.0).and_then(|s| s.cell(k.1)).and_then(|c| c.formula.as_ref()).and_then(|f| f.with_expr(|e| precedents(wb, k.0, e)));
+            let formula = wb.sheet(k.0).and_then(|s| s.cell(k.1)).and_then(|c| c.formula.as_ref());
+            let precedent = formula.and_then(|f| f.with_expr(|e| precedents(wb, k.0, e)));
+            if formula.and_then(|f| f.with_expr(reads_hidden_rows)) == Some(true) {
+                self.hidden_row_readers.insert(k);
+            } else {
+                self.hidden_row_readers.remove(&k);
+            }
             let py = wb.sheet(k.0).and_then(|s| s.cell(k.1)).and_then(|c| c.py.as_ref());
             let python = py.is_some();
             // A Python cell whose result (if any) is not an array spills nothing.
@@ -350,6 +390,7 @@ impl Calc {
             return;
         }
         let mut seeds: Vec<Key> = changed.to_vec();
+        seeds.extend_from_slice(also);
         let mut emptied: Vec<Key> = Vec::new();
         // Typing into (or clearing) a cell a dynamic array spills over (or would spill over)
         // re-evaluates the anchor, which may now be blocked or unblocked.

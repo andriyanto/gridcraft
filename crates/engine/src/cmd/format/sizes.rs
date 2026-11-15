@@ -78,7 +78,7 @@ pub(super) fn row_height(s: &mut Session, p: &Json) -> Result<Json> {
                 e.custom = true;
             }
         }
-        cx.structural = true; // setting a height shows or hides rows: SUBTOTAL(10x) depends on it
+        cx.rows_shown_or_hidden = true; // setting a height shows or hides rows: SUBTOTAL(10x) depends on it
         Ok(Json::Null)
     })
 }
@@ -259,7 +259,7 @@ pub(super) fn autofit_rows(s: &mut Session, p: &Json) -> Result<Json> {
             }
             cx.fit_rows.extend((a..=b).map(|r| (si, r)));
         }
-        cx.structural = true; // autofit reveals hidden rows: SUBTOTAL(10x) depends on it
+        cx.rows_shown_or_hidden = true; // autofit reveals hidden rows: SUBTOTAL(10x) depends on it
         Ok(Json::Null)
     })
 }
@@ -293,7 +293,7 @@ pub(super) fn hide(s: &mut Session, p: &Json, rows: bool, on: bool) -> Result<Js
                 }
             }
         }
-        cx.structural = true; // SUBTOTAL(10x) depends on hidden rows
+        cx.rows_shown_or_hidden = true; // SUBTOTAL(10x) depends on hidden rows
         Ok(Json::Null)
     })
 }

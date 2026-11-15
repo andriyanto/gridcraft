@@ -1,6 +1,6 @@
 # Architecture
 
-> **Last reviewed:** 2026-10-10 · **Last updated:** 2026-11-15 · **Change:** minor (cell store rows shared one by one; earlier: shared CJK fallback baselines; earlier: Python mode in the formula bar; earlier: Python cells as data; earlier: equations: the `math` crate and the layout cache; earlier: recently used functions kept in the preferences; Function Library module; accent icons; earlier: the hidden names that hold macros) · **Target:** Microsoft Excel (Microsoft 365)
+> **Last reviewed:** 2026-10-10 · **Last updated:** 2026-11-15 · **Change:** minor (hiding and filtering rows recalculates only what depends on hidden rows; earlier: cell store rows shared one by one; earlier: shared CJK fallback baselines; earlier: Python mode in the formula bar; earlier: Python cells as data; earlier: equations: the `math` crate and the layout cache; earlier: recently used functions kept in the preferences; Function Library module; accent icons; earlier: the hidden names that hold macros) · **Target:** Microsoft Excel (Microsoft 365)
 
 How GridCraft is built today. Rules for contributors are in [`AGENTS.md`](../AGENTS.md).
 
@@ -39,6 +39,7 @@ including tests, 2026-10-10.
    open before the command and that the command ended or rolled back stays ended and keeps a
    step from its start to the restored workbook, so Undo still returns to the state before it.
 2. **Edits** change the model through copy-on-write bands and rows: an edit copies the cell's row, and rows moved whole by an insert or delete stay shared; undo keeps the previous snapshot.
+   An edit that moves cells (rows, columns, sheets) recalculates every formula. One that only hides, shows or filters rows recalculates the formulas that depend on hidden rows (`SUBTOTAL`, `AGGREGATE`) and what reads them: `Ctx::rows_shown_or_hidden`, `Calc::rows_shown_or_hidden`.
    Undo retains at most 100 steps and trims older steps when its estimated retained cell storage
    exceeds 128 MiB. The newest step remains undoable even if that step alone exceeds the budget.
    The estimate is a history policy, not a measure or hard cap of process memory.
@@ -242,6 +243,7 @@ rpm, tarball), FreeBSD, and web (WASM; WebGPU or WebGL2). Release workflows in
 
 | Date | Change | Summary |
 |---|---|---|
+| 2026-11-15 | minor | Recalculation: hiding, showing, grouping and filtering rows, and setting a row's height, recalculate only the formulas that call `SUBTOTAL` or `AGGREGATE` and what reads them, instead of every formula in the workbook (`Calc::rows_shown_or_hidden`). |
 | 2026-11-15 | minor | Cell store: each row of a band sits behind its own `Arc`. An edit copies the cell's row instead of its 64-row band, and rows moved whole by a row insert or delete stay shared with the undo snapshot, so an undo step retains kilobytes where it retained megabytes. |
 | 2026-11-02 | minor | Python mode in the formula bar: Python mode on the shared editor, `code_field` and its stop keys; drafts follow their sheet by `model::SheetUid` |
 | 2026-11-02 | minor | Python cells as data: `model::PyCode`, the file forms, calc laying out kept results, the limits on open, and what copying, filling and sorting do to `xl()` references; edits that would push code past the limit are refused |

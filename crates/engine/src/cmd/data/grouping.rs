@@ -58,7 +58,7 @@ pub(super) fn group(s: &mut Session, p: &Json, on: bool) -> Result<Json> {
         {
             e.collapsed = false;
         }
-        cx.structural = true; // ungrouping reveals hidden rows: SUBTOTAL(10x) depends on it
+        cx.rows_shown_or_hidden = true; // ungrouping reveals hidden rows: SUBTOTAL(10x) depends on it
         Ok(Json::Null)
     })
 }
@@ -108,7 +108,7 @@ pub(super) fn detail(s: &mut Session, p: &Json, hide: bool) -> Result<Json> {
                 e.collapsed = false;
             }
         }
-        cx.structural = true;
+        cx.rows_shown_or_hidden = true; // SUBTOTAL(10x) depends on hidden rows
         Ok(Json::Null)
     })
 }
@@ -156,7 +156,7 @@ pub(super) fn show_levels(s: &mut Session, p: &Json) -> Result<Json> {
                 map.entry(g.summary()).or_default().collapsed = g.level >= n;
             }
         }
-        cx.structural = true;
+        cx.rows_shown_or_hidden = true; // SUBTOTAL(10x) depends on hidden rows
         Ok(Json::Null)
     })
 }

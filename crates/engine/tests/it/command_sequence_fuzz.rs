@@ -642,7 +642,7 @@ fn formula(rng: &mut Rng, wb: &Workbook) -> String {
     let n = rng.int(1, 6);
     let col = letter(rng.int(0, 9) as u32);
     let tabs = tables(wb);
-    match rng.below(30) {
+    match rng.below(32) {
         0 => format!("={c}+{n}"),
         1 => format!("=SUM({r})"),
         2 => format!("={c}*{c2}"),
@@ -689,6 +689,9 @@ fn formula(rng: &mut Rng, wb: &Workbook) -> String {
         26 => format!("=INDEX({r},{n},1)"),
         27 => format!("=VLOOKUP({c},{r},2,FALSE)"),
         28 => format!("=SEQUENCE({n})*{c}"),
+        // What hidden and filtered rows change: hiding or filtering rows recalculates these only.
+        29 => format!("=SUBTOTAL({},{r})", rng.pick(&[9, 109, 3, 103, 1, 101])),
+        30 => format!("=AGGREGATE({},{},{r})", rng.pick(&[9, 4, 2]), rng.pick(&[5, 7, 1, 4])),
         _ => format!("=TEXT({c},\"0.00\")"),
     }
 }

@@ -39,13 +39,13 @@ including tests, 2026-10-10.
    open before the command and that the command ended or rolled back stays ended and keeps a
    step from its start to the restored workbook, so Undo still returns to the state before it.
 2. **Edits** change the model through copy-on-write bands and rows: an edit copies the cell's row, and rows moved whole by an insert or delete stay shared; undo keeps the previous snapshot.
-   An edit that moves cells (rows, columns, sheets) recalculates every formula. One that only hides, shows or filters rows recalculates the formulas that depend on hidden rows (`SUBTOTAL`, `AGGREGATE`) and what reads them: `Ctx::rows_shown_or_hidden`, `Calc::rows_shown_or_hidden`.
    Undo retains at most 100 steps and trims older steps when its estimated retained cell storage
    exceeds 128 MiB. The newest step remains undoable even if that step alone exceeds the budget.
    The estimate is a history policy, not a measure or hard cap of process memory.
 3. **Recalc** marks dependents of changed cells dirty through the dependency graph (with range
    nodes for range dependents), evaluates in topological order, spills dynamic arrays and reports
    `#SPILL!`/cycles. Volatile functions are always dirty.
+   An edit that moves cells (rows, columns, sheets) recalculates every formula. One that only hides, shows or filters rows recalculates the formulas that depend on hidden rows (`SUBTOTAL`, `AGGREGATE`) and what reads them: `Ctx::rows_shown_or_hidden`, `Calc::rows_shown_or_hidden`.
 4. **Rendering**: the egui grid reads display values (number formats applied in `engine/display.rs`)
    for the visible window only; charts render through `crates/chart` primitives.
 5. **Files**: `engine/io.rs` sniffs content (XLSX, XLSB, ODS) before trusting the extension and

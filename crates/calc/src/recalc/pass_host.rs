@@ -1,5 +1,6 @@
 use super::graph::{HashMap, HashSet, Key};
 use super::{Evaluator, Host, Workbook, stack_position};
+use crate::Area;
 use crate::spill_index::{Cover, SpillIndex};
 use gridcraft_core::{Array, CellError, CellRef, RangeRef, Value};
 use gridcraft_formula::Expr;
@@ -95,10 +96,24 @@ pub(super) struct PassHost<'a> {
     /// The spill areas the sheet holds for the formulas being evaluated, innermost last: what a
     /// formula spilled last time is its own result, so reading it is a circular reference.
     own_areas: Vec<(Key, RangeRef)>,
+    /// The formulas being evaluated, innermost last, for `trim_end`.
+    evaluating: Vec<Evaluating>,
+    /// Where the filled cells of a block end (`content_end`), for the blocks asked about in the pass.
+    content_ends: HashMap<(usize, RangeRef), Option<CellRef>>,
     /// The kept results of the Python cells in the pass: a Python cell isn't evaluated, its
     /// result is laid out (an array spills from the cell, as a formula's does). Each one is in
     /// `pending` until it is laid out, so a formula that reads it first gets its new value.
     python: HashMap<Key, Value>,
+}
+
+/// A formula being evaluated.
+struct Evaluating {
+    key: Key,
+    expr: std::sync::Arc<Expr>,
+    /// The references written in the formula that are cut down to their filled cells when read as
+    /// an array (`A:A`, `1:2`), worked out when the first of them is read. `Some(None)` when the
+    /// formula also has references that are worked out as it runs.
+    open_ended: Option<Option<std::sync::Arc<[Area]>>>,
 }
 
 impl<'a> PassHost<'a> {
@@ -142,8 +157,35 @@ impl<'a> PassHost<'a> {
             unsettled: 0,
             memo: gridcraft_functions::Memo::new(),
             own_areas: Vec::new(),
+            evaluating: Vec::new(),
+            content_ends: HashMap::default(),
             python: HashMap::default(),
         }
+    }
+
+    /// The last row and the last column of `range` that hold a value, a formula or a spilled
+    /// value, as one cell; `None` when the block holds none. Cells that only carry a format don't
+    /// count: formatting a cell recalculates nothing.
+    fn content_end(&mut self, sheet: usize, range: RangeRef) -> Option<CellRef> {
+        if let Some(end) = self.content_ends.get(&(sheet, range)) {
+            return *end;
+        }
+        let mut end: Option<CellRef> = None;
+        let mut reach = |c: CellRef| end = Some(end.map_or(c, |e| CellRef::new(e.row.max(c.row), e.col.max(c.col))));
+        if let Some(sh) = self.wb.sheet(sheet) {
+            for (c, cell) in sh.cells.iter_range(range) {
+                if cell.has_content() {
+                    reach(c);
+                }
+            }
+            for spill in sh.spill_ranges.values() {
+                if let Some(part) = spill.intersection(&range) {
+                    reach(part.end);
+                }
+            }
+        }
+        self.content_ends.insert((sheet, range), end);
+        end
     }
 
     /// Adds the dirty Python cells of the pass and their kept results: like the formulas, they
@@ -382,10 +424,12 @@ impl PassHost<'_> {
         }
         let expr = std::sync::Arc::clone(expr);
         let outer_out_of_stack = std::mem::replace(&mut self.out_of_stack, false);
+        self.evaluating.push(Evaluating { key: k, expr: std::sync::Arc::clone(&expr), open_ended: None });
         let v = {
             let mut ev = Evaluator::new(self, k.0, k.1);
             ev.value(&expr)
         };
+        self.evaluating.pop();
         if own_area.is_some() {
             self.own_areas.pop();
         }
@@ -889,6 +933,37 @@ impl Host for PassHost<'_> {
     fn used_range(&mut self, sheet: usize) -> Option<RangeRef> {
         let wb = self.wb;
         *self.used.entry(sheet).or_insert_with(|| wb.sheet(sheet).and_then(|s| s.used_range()))
+    }
+    /// The bound comes from the formula's own references, not from the sheet's used range. The
+    /// used range changes when a cell is filled anywhere on the sheet, which recalculates nothing
+    /// that doesn't read that cell: a formula whose array (and so whose spill) was sized by it
+    /// kept a size a full recalculation no longer gave. Here the area ends where its own filled
+    /// cells end, or where those of another whole row or column the formula reads do, so the
+    /// arrays of `A:A*B:B` stay the same length. Every cell that can move this bound is one the
+    /// formula reads, and so one whose change recalculates it.
+    ///
+    /// A formula with references that are worked out as it runs (INDIRECT, OFFSET, names, table
+    /// references) is recalculated on every change, and keeps the used range as its bound.
+    fn trim_end(&mut self, a: &Area) -> Option<CellRef> {
+        let wb = self.wb;
+        let open_ended = self.evaluating.last_mut().and_then(|formula| {
+            formula
+                .open_ended
+                .get_or_insert_with(|| {
+                    let (areas, dynamic) = crate::eval::precedents(wb, formula.key.0, &formula.expr);
+                    (!dynamic).then(|| areas.into_iter().filter(|area| !crate::eval::keeps_full_size(&area.range)).collect())
+                })
+                .clone()
+        });
+        let Some(open_ended) = open_ended else { return self.used_range(a.sheet).map(|used| used.end) };
+        let mut end = self.content_end(a.sheet, a.range);
+        for other in open_ended.iter().filter(|other| other.sheet == a.sheet && other.range != a.range) {
+            end = match (end, self.content_end(other.sheet, other.range)) {
+                (Some(x), Some(y)) => Some(CellRef::new(x.row.max(y.row), x.col.max(y.col))),
+                (x, y) => x.or(y),
+            };
+        }
+        end
     }
     fn now_serial(&self) -> f64 {
         self.now

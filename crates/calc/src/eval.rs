@@ -33,6 +33,17 @@ const FULL_SIZE_CELLS: u64 = 16_384;
 /// of the sheet (`A:A`, `A2:A1048576`, several whole rows) and larger blocks stop at the sheet's used
 /// range, so that formulas over them stay fast.
 const FULL_SIZE_BOUNDED_CELLS: u64 = 1_048_576;
+
+/// Whether a reference read as an array keeps every cell of its block, blanks included: a block
+/// of at most `FULL_SIZE_CELLS` cells, or of at most `FULL_SIZE_BOUNDED_CELLS` when it doesn't run
+/// to the sheet's edge. `A:A`, `1:2` and `A2:A1048576` stand for "the rest of the column", not for
+/// a block of a chosen size, and are cut down to their filled cells instead (`Evaluator::trim`).
+/// One whole row (`1:1`) is small enough to keep its size.
+pub fn keeps_full_size(range: &RangeRef) -> bool {
+    let cells = u64::from(range.height()) * u64::from(range.width());
+    let to_edge = range.end.row == MAX_ROWS - 1 || range.end.col == MAX_COLS - 1;
+    cells <= FULL_SIZE_CELLS || (!to_edge && cells <= FULL_SIZE_BOUNDED_CELLS)
+}
 const MAX_DEPTH: usize = 400;
 /// Lambda invocations one cell may make. A semantically bounded formula in Excel can invoke
 /// its lambda at most once per cell of an array (capped here by `MAX_CELLS`), so this covers
@@ -119,6 +130,13 @@ pub trait Host {
     /// keep the workbook unchanged while evaluating can remember it.
     fn used_range(&mut self, sheet: usize) -> Option<RangeRef> {
         self.workbook().sheet(sheet).and_then(|s| s.used_range())
+    }
+    /// The last row and column an area that runs to the sheet's edge is cut down to when it is
+    /// read as an array (`A:A` holds a million cells, a handful of them filled): the end of the
+    /// sheet's used range, unless the host knows a closer bound that still holds every filled
+    /// cell of the area. `None` when there is nothing to keep but the area's first cell.
+    fn trim_end(&mut self, a: &Area) -> Option<CellRef> {
+        self.used_range(a.sheet).map(|used| used.end)
     }
     /// Calls `f` on each stored value of a block, row-major (formula cells evaluated first),
     /// until `f` returns false. `false` when this host can't (callers use `range_values`).
@@ -260,8 +278,9 @@ impl<'h> Evaluator<'h> {
     /// A block keeps its full shape (blanks included) when it holds at most `FULL_SIZE_CELLS`
     /// cells, or when it holds at most `FULL_SIZE_BOUNDED_CELLS` cells (one full column's worth)
     /// and does not run to the sheet's last row or column. Every other block (larger, or a
-    /// bigger one that runs to the sheet's edge, such as `A:A` or `1:1`) is trimmed to the
-    /// sheet's used range before its values are read. An array over `MAX_CELLS` is `#NUM!`.
+    /// bigger one that runs to the sheet's edge, such as `A:A` or `1:1`) is trimmed to where its
+    /// filled cells end before its values are read (`Evaluator::trim`). An array over
+    /// `MAX_CELLS` is `#NUM!`.
     pub fn deref(&mut self, ev: Ev) -> Value {
         match ev {
             Ev::V(v) => v,
@@ -279,12 +298,7 @@ impl<'h> Evaluator<'h> {
         }
         // A reference keeps its size, so the array has its shape and its blanks count
         // (`=A1:A10`, `SUMPRODUCT(--(A1:A10=""))`).
-        let cells = u64::from(a.range.height()) * u64::from(a.range.width());
-        // `A:A`, `1:1` and `A2:A1048576` run to the edge of the sheet: they stand for "the rest of
-        // the column", not for a block of a chosen size.
-        let to_edge = a.range.end.row == MAX_ROWS - 1 || a.range.end.col == MAX_COLS - 1;
-        let full_size = cells <= FULL_SIZE_CELLS || (!to_edge && cells <= FULL_SIZE_BOUNDED_CELLS);
-        let range = if full_size { a.range } else { self.trim(a) };
+        let range = if keeps_full_size(&a.range) { a.range } else { self.trim(a) };
         let (h, w) = (range.height() as usize, range.width() as usize);
         if (h as u64) * (w as u64) > MAX_CELLS {
             return Value::Error(CellError::Num);
@@ -296,18 +310,17 @@ impl<'h> Evaluator<'h> {
         Array::new(h, w, data).map(Value::from).unwrap_or(Value::Error(CellError::Value))
     }
 
-    /// Trims the bottom/right of an area to the sheet's used range (keeps the top-left so
-    /// positions stay right).
+    /// Trims the bottom/right of an area to where its filled cells end (`Host::trim_end`; keeps
+    /// the top-left so positions stay right).
     pub fn trim(&mut self, a: &Area) -> RangeRef {
         if self.host.workbook().sheet(a.sheet).is_none() {
             return a.range;
         }
-        let used = self.host.used_range(a.sheet);
         let (mut r1, mut c1) = (a.range.end.row, a.range.end.col);
-        match used {
-            Some(u) => {
-                r1 = r1.min(u.end.row.max(a.range.start.row));
-                c1 = c1.min(u.end.col.max(a.range.start.col));
+        match self.host.trim_end(a) {
+            Some(end) => {
+                r1 = r1.min(end.row.max(a.range.start.row));
+                c1 = c1.min(end.col.max(a.range.start.col));
             }
             None => {
                 r1 = a.range.start.row;

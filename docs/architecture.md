@@ -17,7 +17,7 @@ including tests, 2026-10-10.
 | L1 | `formula` | ~1.7k | Tokenizer, parser, AST, printer (A1 and R1C1), reference adjustment for copy, fill and structural edits |
 | L1 | `functions` | ~13.4k | The function library: `FnSpec` registry (name, arity, category, scalar args, signature, description) and pure implementations; automatic array lifting |
 | L1 | `math` | ~1.1k | Equations: LaTeX laid out by RaTeX (MIT, pinned) into plain glyph, rule and path data, and LaTeX to Office Math; every entry point capped and panic-guarded |
-| L2 | `model` | ~2.2k | Workbook, sheets, copy-on-write cell store (64-row bands behind `Arc`), interned styles, names, tables, CF, validation, comments, charts, shapes, images, sparklines, print settings, protection |
+| L2 | `model` | ~2.2k | Workbook, sheets, copy-on-write cell store (64-row bands behind `Arc`, each row behind its own), interned styles, names, tables, CF, validation, comments, charts, shapes, images, sparklines, print settings, protection |
 | L2 | `calc` | ~2.9k | Evaluator (references, names, tables, LET/LAMBDA, special forms like OFFSET/INDIRECT/SUBTOTAL) and dependency-graph recalculation with dynamic arrays, spills and cycle detection; single-threaded |
 | L2 | `xlsx` | ~10.7k | XLSX read/write (transitional and strict read), CSV/TSV, XLSB and ODS data import, PivotTable caches, DrawingML charts and drawings; byte slices only (WASM-safe); lenient reader that reports warnings |
 | L2 | `pdf` | ~1k | Small PDF 1.7 writer (14 standard fonts, vectors, images) for print and export |
@@ -38,7 +38,7 @@ including tests, 2026-10-10.
    undo and redo history as they were before the command (never-crash guard); a group that was
    open before the command and that the command ended or rolled back stays ended and keeps a
    step from its start to the restored workbook, so Undo still returns to the state before it.
-2. **Edits** change the model through copy-on-write bands; undo keeps the previous snapshot.
+2. **Edits** change the model through copy-on-write bands and rows: an edit copies the cell's row, and rows moved whole by an insert or delete stay shared; undo keeps the previous snapshot.
    Undo retains at most 100 steps and trims older steps when its estimated retained cell storage
    exceeds 128 MiB. The newest step remains undoable even if that step alone exceeds the budget.
    The estimate is a history policy, not a measure or hard cap of process memory.

@@ -31,6 +31,7 @@ mod sparse_clear_invalidation;
 mod stale_spills;
 mod stored_list_shape;
 mod structural_edit_rewrite;
+mod table_filter_save;
 mod table_resize_overlap;
 mod table_total_row;
 mod table_total_row_last_row;

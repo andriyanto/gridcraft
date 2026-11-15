@@ -1712,14 +1712,34 @@ fn a_table_filter_criteria_survive_a_round_trip() {
         Some(AutoFilter { range: rr("A1:A4"), criteria: vec![(0, FilterCriterion::Values { values: vec!["East".into()], blanks: false })] });
     s.rows.entry(1).or_default().hidden = true;
 
-    let (back, rep) = read_xlsx(&write_xlsx(&wb).unwrap()).unwrap();
-    assert!(rep.warnings.is_empty(), "{:?}", rep.warnings);
-    let b = back.sheet(0).unwrap();
-    let t = b.tables.first().expect("the table survived");
-    let (_, crit) = t.filter.first().expect("the table's filter criteria were kept on save");
-    assert!(matches!(crit, FilterCriterion::Values { values, .. } if values == &["East".to_string()]), "the criteria were dropped: {:?}", t.filter);
-    assert!(b.is_row_hidden(1), "the row the filter hid is still hidden");
-    assert!(b.autofilter.is_none(), "a table's filter belongs to the table part, not the sheet");
+    let bytes = write_xlsx(&wb).unwrap();
+    // In the file the criteria belong to the table part, not to the sheet.
+    let mut package = crate::package::Package::open(&bytes).unwrap();
+    let table_part = package.read_xml("xl/tables/table1.xml").unwrap().expect("the table part");
+    assert!(table_part.child("autoFilter").is_some_and(|af| af.child("filterColumn").is_some()), "the criteria are in the table part");
+    let sheet_part = package.read_xml("xl/worksheets/sheet1.xml").unwrap().expect("the sheet part");
+    assert!(sheet_part.child("autoFilter").is_none(), "a sheet filter over a table would be invalid");
+
+    // Read back, they are the sheet's filter again: the one the filter commands clear and change.
+    // Left in `Table::filter`, they hid their rows and nothing could clear them.
+    let mut again = wb;
+    for _ in 0..2 {
+        let (back, rep) = read_xlsx(&write_xlsx(&again).unwrap()).unwrap();
+        assert!(rep.warnings.is_empty(), "{:?}", rep.warnings);
+        let b = back.sheet(0).unwrap();
+        let t = b.tables.first().expect("the table survived");
+        let af = b.autofilter.as_ref().expect("the table's filter criteria were kept on save");
+        assert_eq!(af.range, rr("A1:A4"));
+        let crit = af.criteria.first().map(|(_, crit)| crit);
+        assert!(
+            matches!(crit, Some(FilterCriterion::Values { values, .. }) if values == &["East".to_string()]),
+            "the criteria were dropped: {:?}",
+            af.criteria
+        );
+        assert!(t.filter.is_empty() && t.filter_button, "the criteria are in one place");
+        assert!(b.is_row_hidden(1) && b.is_row_filtered(1), "the row the filter hid is still hidden, by the filter");
+        again = back;
+    }
 }
 
 /// Stored `colId` offsets are relative to the filter range's first column, so criteria of a filter

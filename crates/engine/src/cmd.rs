@@ -370,6 +370,11 @@ pub struct Ctx<'a> {
     /// on hidden rows (SUBTOTAL, AGGREGATE) and what reads them are recalculated, with whatever
     /// `changed` holds. `structural` wins when both are set.
     pub rows_shown_or_hidden: bool,
+    /// The sheets whose rows, columns or cells the command inserted or deleted, when it moved no
+    /// cell of any other sheet: a structural edit in every other respect, recalculated as far as
+    /// it reaches (`Calc::sheets_restructured`) instead of everywhere. `structural` wins when
+    /// both are set.
+    pub restructured: Vec<usize>,
     pub sel: &'a mut Selection,
     /// Rows whose automatic height should be recomputed (sheet, row).
     pub fit_rows: Vec<(usize, u32)>,
@@ -405,13 +410,17 @@ pub(crate) fn commit<R>(d: &mut DocState, f: impl FnOnce(&mut Ctx) -> Result<R>)
         changed: Vec::new(),
         structural: false,
         rows_shown_or_hidden: false,
+        restructured: Vec::new(),
         sel: &mut sel,
         fit_rows: Vec::new(),
         protection_checked: false,
         edits: Vec::new(),
     };
     let r = f(&mut ctx)?;
-    let Ctx { mut wb, mut changed, structural, rows_shown_or_hidden, mut fit_rows, protection_checked, edits, .. } = ctx;
+    let Ctx { mut wb, mut changed, structural, rows_shown_or_hidden, restructured, mut fit_rows, protection_checked, edits, .. } = ctx;
+    // Where the recalculation reaches is the only difference between the two.
+    let recalc_everything = structural;
+    let structural = structural || !restructured.is_empty();
     // Equations whose source changed (or that arrived without a layout, as from a paste) are
     // laid out here, so painting only ever reads the cache.
     wb.refresh_equations();
@@ -440,8 +449,10 @@ pub(crate) fn commit<R>(d: &mut DocState, f: impl FnOnce(&mut Ctx) -> Result<R>)
     if let Some(t0) = t0 {
         eprintln!("commit: edit {:?}, {} changed", since(t0), changed.len());
     }
-    if structural {
+    if recalc_everything {
         d.calc.recalc_all(&mut wb);
+    } else if structural {
+        d.calc.sheets_restructured(&mut wb, &restructured, &changed);
     } else if rows_shown_or_hidden {
         d.calc.rows_shown_or_hidden(&mut wb, &changed);
     } else if !changed.is_empty() {
@@ -801,5 +812,15 @@ impl Ctx<'_> {
     }
     pub fn touch(&mut self, sheet: usize, c: CellRef) {
         self.changed.push((sheet, c));
+    }
+    /// Rows, columns or cells were inserted or deleted on `sheet` (see [`Ctx::restructured`]).
+    pub fn restructured(&mut self, sheet: usize) {
+        if !self.restructured.contains(&sheet) {
+            self.restructured.push(sheet);
+        }
+    }
+    /// The edit moves cells: one that sets `structural`, or one that restructures sheets.
+    pub fn is_structural(&self) -> bool {
+        self.structural || !self.restructured.is_empty()
     }
 }

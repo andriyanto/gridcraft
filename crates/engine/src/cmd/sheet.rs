@@ -305,7 +305,7 @@ fn insert_lines(s: &mut Session, p: &Json, axis: Axis) -> Result<Json> {
             inherit_line_format(sh, axis, at, count);
         }
         rewrite(cx, &name, &Edit::Insert { axis, at, count })?;
-        cx.structural = true;
+        cx.restructured(sheet);
         Ok(Json::Null)
     })?;
     cancel_copy_mode(s);
@@ -371,7 +371,7 @@ fn delete_lines(s: &mut Session, p: &Json, axis: Axis) -> Result<Json> {
             }
             rewrite(cx, &name, &Edit::Delete { axis, at, count })?;
         }
-        cx.structural = true;
+        cx.restructured(sheet);
         Ok(Json::Null)
     })?;
     cancel_copy_mode(s);
@@ -472,7 +472,7 @@ fn move_columns(s: &mut Session, p: &Json) -> Result<Json> {
             anchor: CellRef::new(active_row, final_start),
             ranges: vec![RangeRef::cols(final_start, final_start + count - 1)],
         };
-        cx.structural = true;
+        cx.restructured(sheet);
         Ok(json!({"cols": RangeRef::cols(final_start, final_start + count - 1).a1()}))
     })?;
     cancel_copy_mode(s);
@@ -512,7 +512,7 @@ fn insert_cells(s: &mut Session, p: &Json) -> Result<Json> {
         shift_cell_features(sh, &e);
         let name = cx.wb.sheet(sheet).map(|s| s.name.clone()).unwrap_or_default();
         rewrite(cx, &name, &e)?;
-        cx.structural = true;
+        cx.restructured(sheet);
         Ok(Json::Null)
     })?;
     cancel_copy_mode(s);
@@ -547,7 +547,7 @@ fn delete_cells(s: &mut Session, p: &Json) -> Result<Json> {
         }
         // References into the deleted cells become #REF!; the rest move.
         rewrite(cx, &name, &e)?;
-        cx.structural = true;
+        cx.restructured(sheet);
         Ok(Json::Null)
     })?;
     cancel_copy_mode(s);

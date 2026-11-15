@@ -1,10 +1,12 @@
 //! Copy-on-write sparse cell storage.
 //!
-//! Cells live in bands of 64 rows, each band behind an `Arc`. Cloning a store (an undo snapshot)
-//! copies only the band pointers; editing a cell copies just its band.
+//! Cells live in bands of 64 rows, each band behind an `Arc`, and each row of a band behind an
+//! `Arc` of its own. Cloning a store (an undo snapshot) copies only the band pointers; editing a
+//! cell copies its band's row pointers and that one row. A row moved whole (rows inserted or
+//! deleted above it) keeps its `Arc`, so a snapshot from before the move still shares its cells.
 
-use std::collections::BTreeMap;
 use std::collections::btree_map::Entry;
+use std::collections::{BTreeMap, HashSet};
 use std::ops::RangeInclusive;
 use std::sync::Arc;
 
@@ -19,10 +21,13 @@ fn has_value(cell: &Cell) -> bool {
     cell.has_content()
 }
 
+/// The cells of one row: col → cell.
+type Row = BTreeMap<u32, Cell>;
+
 #[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
 struct Band {
-    /// row → (col → cell)
-    rows: BTreeMap<u32, BTreeMap<u32, Cell>>,
+    /// row → its cells. Copying a band (to edit one of its rows) copies these pointers only.
+    rows: BTreeMap<u32, Arc<Row>>,
 }
 
 #[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
@@ -44,13 +49,13 @@ impl CellStore {
     pub fn get(&self, c: CellRef) -> Option<&Cell> {
         self.bands.get(&(c.row / BAND))?.rows.get(&c.row)?.get(&c.col)
     }
-    /// Mutable access (copies the band if shared).
+    /// Mutable access (copies the band's row pointers and the cell's row if shared).
     pub fn get_mut(&mut self, c: CellRef) -> Option<&mut Cell> {
         let band = self.bands.get_mut(&(c.row / BAND))?;
         if !band.rows.get(&c.row).is_some_and(|r| r.contains_key(&c.col)) {
             return None;
         }
-        Arc::make_mut(band).rows.get_mut(&c.row)?.get_mut(&c.col)
+        Arc::make_mut(Arc::make_mut(band).rows.get_mut(&c.row)?).get_mut(&c.col)
     }
     /// Stores a cell; a default (empty, unstyled) cell is removed instead.
     pub fn set(&mut self, c: CellRef, cell: Cell) {
@@ -59,7 +64,7 @@ impl CellStore {
             return;
         }
         let band = Arc::make_mut(self.bands.entry(c.row / BAND).or_default());
-        if band.rows.entry(c.row).or_default().insert(c.col, cell).is_none() {
+        if Arc::make_mut(band.rows.entry(c.row).or_default()).insert(c.col, cell).is_none() {
             self.len += 1;
         }
     }
@@ -92,7 +97,7 @@ impl CellStore {
             return None;
         }
         let b = Arc::make_mut(band);
-        let row = b.rows.get_mut(&c.row)?;
+        let row = Arc::make_mut(b.rows.get_mut(&c.row)?);
         let old = row.remove(&c.col);
         if row.is_empty() {
             b.rows.remove(&c.row);
@@ -202,14 +207,16 @@ impl CellStore {
                 continue;
             }
             let (a, b) = (a.map_or(&empty, |x| x), b.map_or(&empty, |x| x));
-            for (row, cols) in &a.rows {
-                for (col, cell) in cols {
+            // A row both bands share has no differences either.
+            let shared = |row: &u32, cols: &Arc<Row>, other: &Band| other.rows.get(row).is_some_and(|r| Arc::ptr_eq(r, cols));
+            for (row, cols) in a.rows.iter().filter(|(row, cols)| !shared(row, cols, b)) {
+                for (col, cell) in cols.iter() {
                     if b.rows.get(row).and_then(|r| r.get(col)) != Some(cell) {
                         out.push(CellRef::new(*row, *col));
                     }
                 }
             }
-            for (row, cols) in &b.rows {
+            for (row, cols) in b.rows.iter().filter(|(row, cols)| !shared(row, cols, a)) {
                 for col in cols.keys() {
                     if !a.rows.get(row).is_some_and(|r| r.contains_key(col)) {
                         out.push(CellRef::new(*row, *col));
@@ -219,14 +226,19 @@ impl CellStore {
         }
         out
     }
-    /// Approximate heap storage kept alive by this snapshot's bands that `newer` no longer
-    /// shares. This is for bounding Undo history, not for reporting process memory: BTreeMap
-    /// nodes and allocator overhead vary by platform. Shared formulas and values are counted
-    /// only when the newer band no longer holds the same Arc.
+    /// Approximate heap storage kept alive by this snapshot's bands and rows that `newer` no
+    /// longer shares. This is for bounding Undo history, not for reporting process memory:
+    /// BTreeMap nodes and allocator overhead vary by platform. A row `newer` still holds counts
+    /// only its pointer, wherever `newer` holds it: rows moved whole by an insert or delete above
+    /// them keep their cells. Shared formulas and values are counted only when the newer row no
+    /// longer holds the same Arc.
     pub fn retained_bytes_against(&self, newer: &CellStore) -> usize {
         use std::mem::size_of;
 
         let mut bytes = 0usize;
+        // The rows of `newer` that sit in bands this snapshot doesn't share, by address. Built
+        // only when a row isn't found where it was.
+        let mut moved: Option<HashSet<*const Row>> = None;
         for (key, band) in &self.bands {
             let next = newer.bands.get(key);
             if next.is_some_and(|b| Arc::ptr_eq(b, band)) {
@@ -235,7 +247,17 @@ impl CellStore {
             bytes = bytes.saturating_add(size_of::<Band>());
             for (row, cols) in &band.rows {
                 bytes = bytes.saturating_add(size_of::<u32>() + 3 * size_of::<usize>());
-                for (col, cell) in cols {
+                if next.and_then(|b| b.rows.get(row)).is_some_and(|r| Arc::ptr_eq(r, cols)) {
+                    continue;
+                }
+                let moved = moved.get_or_insert_with(|| {
+                    let unshared = newer.bands.iter().filter(|(k, b)| !self.bands.get(*k).is_some_and(|old| Arc::ptr_eq(old, b)));
+                    unshared.flat_map(|(_, b)| b.rows.values().map(Arc::as_ptr)).collect()
+                });
+                if moved.contains(&Arc::as_ptr(cols)) {
+                    continue;
+                }
+                for (col, cell) in cols.iter() {
                     // Cells and BTreeMap nodes are duplicated with a cloned band even when
                     // their formula/value Arcs are still shared with the next snapshot.
                     bytes = bytes.saturating_add(size_of::<u32>() + size_of::<Cell>() + 3 * size_of::<usize>());
@@ -277,7 +299,9 @@ impl CellStore {
             return keys.into_iter().filter_map(|c| self.remove(c).map(|cell| (c, cell))).collect();
         }
         let rows = self.take_rows(r.start.row..=r.end.row, r.start.col..=r.end.col);
-        rows.into_iter().flat_map(|(row, cols)| cols.into_iter().map(move |(col, cell)| (CellRef::new(row, col), cell))).collect()
+        rows.into_iter()
+            .flat_map(|(row, cols)| Arc::unwrap_or_clone(cols).into_iter().map(move |(col, cell)| (CellRef::new(row, col), cell)))
+            .collect()
     }
     /// Rows strictly greater than or equal to `from` moved by `delta` (positive = down). Rows that
     /// would land before `from`... callers delete the vacated block first.
@@ -287,14 +311,14 @@ impl CellStore {
     }
     pub fn shift_cols(&mut self, from: u32, delta: i64) {
         let moved = self.take_rows(0..=u32::MAX, from..=u32::MAX);
-        self.put_rows(moved.into_iter().map(|(row, cols)| (row, shift_keys(cols, delta))));
+        self.put_rows(moved.into_iter().map(|(row, cols)| (row, Arc::new(shift_keys(Arc::unwrap_or_clone(cols), delta)))));
     }
     /// Shifts cells within rows `r0..=r1` and columns `>= from` horizontally (Insert/Delete Cells
     /// with shift right/left).
     pub fn shift_cols_in_rows(&mut self, r0: u32, r1: u32, from: u32, delta: i64) {
         let r = RangeRef::new(CellRef::new(r0, from), CellRef::new(r1, gridcraft_core::MAX_COLS - 1));
         let moved = self.take_rows(r.start.row..=r.end.row, r.start.col..=r.end.col);
-        self.put_rows(moved.into_iter().map(|(row, cols)| (row, shift_keys(cols, delta))));
+        self.put_rows(moved.into_iter().map(|(row, cols)| (row, Arc::new(shift_keys(Arc::unwrap_or_clone(cols), delta)))));
     }
     /// Shifts cells within columns `c0..=c1` and rows `>= from` vertically.
     pub fn shift_rows_in_cols(&mut self, c0: u32, c1: u32, from: u32, delta: i64) {
@@ -309,8 +333,9 @@ impl CellStore {
     }
     /// Removes the cells in `rows` x `cols` and returns them grouped by row, in row order. Moves
     /// whole column maps (or the split-off part of one) instead of removing cell by cell, and only
-    /// copies bands that hold a cell in the block, so snapshots keep sharing the others.
-    fn take_rows(&mut self, rows: RangeInclusive<u32>, cols: RangeInclusive<u32>) -> Vec<(u32, BTreeMap<u32, Cell>)> {
+    /// copies bands that hold a cell in the block, so snapshots keep sharing the others. A row
+    /// taken whole comes out as the `Arc` it was stored in, still shared with those snapshots.
+    fn take_rows(&mut self, rows: RangeInclusive<u32>, cols: RangeInclusive<u32>) -> Vec<(u32, Arc<Row>)> {
         let (r0, r1, c0, c1) = (*rows.start(), *rows.end(), *cols.start(), *cols.end());
         let mut out = Vec::new();
         if r0 > r1 || c0 > c1 {
@@ -342,17 +367,23 @@ impl CellStore {
                 None => BTreeMap::new(),
             };
             for (row, mut kept) in block {
-                let taken = if whole_rows {
+                let taken = if whole_rows
+                    || (kept.range(..c0).next().is_none() && c1.checked_add(1).is_none_or(|next| kept.range(next..).next().is_none()))
+                {
+                    // Every cell of the row is in the block: the row goes as it is.
                     std::mem::take(&mut kept)
+                } else if kept.range(c0..=c1).next().is_none() {
+                    // No cell of the row is in the block: the row stays as it is.
+                    Arc::default()
                 } else if c1.checked_add(1).is_none_or(|next| kept.range(next..).next().is_none()) {
                     // Nothing right of the block: one split.
-                    kept.split_off(&c0)
+                    Arc::new(Arc::make_mut(&mut kept).split_off(&c0))
                 } else {
                     let mut taken = BTreeMap::new();
-                    for (col, cell) in kept.extract_if(c0..=c1, |_, _| true) {
+                    for (col, cell) in Arc::make_mut(&mut kept).extract_if(c0..=c1, |_, _| true) {
                         taken.insert(col, cell);
                     }
-                    taken
+                    Arc::new(taken)
                 };
                 if !kept.is_empty() {
                     band.rows.insert(row, kept);
@@ -371,8 +402,9 @@ impl CellStore {
     }
     /// Stores rows of cells (each row at most once) the way `set` stores each cell: a cell
     /// replaces what is there, and a blank cell clears its destination instead of being stored.
-    /// A row with nothing stored yet takes the whole map. Rows in order share one band lookup.
-    fn put_rows(&mut self, rows: impl Iterator<Item = (u32, BTreeMap<u32, Cell>)>) {
+    /// A row with nothing stored yet takes the whole map, in the `Arc` it came in. Rows in order
+    /// share one band lookup.
+    fn put_rows(&mut self, rows: impl Iterator<Item = (u32, Arc<Row>)>) {
         let mut rows = rows.peekable();
         let mut group = Vec::new();
         while let Some((first, cols)) = rows.next() {
@@ -396,7 +428,7 @@ impl CellStore {
                 match band.rows.entry(row) {
                     Entry::Vacant(slot) => {
                         if cols.values().any(Cell::is_blank) {
-                            cols.retain(|_, cell| !cell.is_blank());
+                            Arc::make_mut(&mut cols).retain(|_, cell| !cell.is_blank());
                         }
                         if !cols.is_empty() {
                             self.len += cols.len();
@@ -404,8 +436,8 @@ impl CellStore {
                         }
                     }
                     Entry::Occupied(mut slot) => {
-                        let dest = slot.get_mut();
-                        for (col, cell) in cols {
+                        let dest = Arc::make_mut(slot.get_mut());
+                        for (col, cell) in Arc::unwrap_or_clone(cols) {
                             if cell.is_blank() {
                                 if dest.remove(&col).is_some() {
                                     self.len -= 1;
@@ -727,5 +759,84 @@ mod tests {
         s.shift_cols(5, 1);
         assert!(Arc::ptr_eq(&s.bands[&0], &snap.bands[&0]));
         assert_eq!(s.get(c(201, 6)).map(|x| x.value.clone()), Some(Value::from("x")));
+    }
+
+    /// A store of `rows` rows with `cols` numbers in each.
+    fn grid(rows: u32, cols: u32) -> CellStore {
+        let mut s = CellStore::new();
+        for r in 0..rows {
+            for col in 0..cols {
+                s.set(c(r, col), Cell::value(f64::from(r * 100 + col).into()));
+            }
+        }
+        s
+    }
+
+    fn row_of(s: &CellStore, row: u32) -> &Arc<Row> {
+        &s.bands[&(row / BAND)].rows[&row]
+    }
+
+    #[test]
+    fn editing_a_cell_copies_its_row_and_shares_the_rest_of_its_band() {
+        let mut s = grid(64, 8);
+        let snap = s.clone();
+        s.set(c(10, 3), Cell::value("edited".into()));
+        s.set(c(11, 20), Cell::value("new".into()));
+        if let Some(cell) = s.get_mut(c(12, 0)) {
+            cell.value = "changed".into();
+        }
+        s.remove(c(13, 0));
+        for row in 0..64 {
+            assert_eq!(Arc::ptr_eq(row_of(&s, row), row_of(&snap, row)), !(10..=13).contains(&row), "row {row}");
+        }
+        assert_eq!(snap.get(c(10, 3)).map(|x| x.value.clone()), Some(Value::from(1003.0)), "the snapshot keeps its cells");
+        assert_eq!(snap, grid(64, 8));
+        // What the snapshot alone keeps alive is four rows, not the band's sixty-four.
+        let whole_band = snap.retained_bytes_against(&CellStore::new());
+        assert!(snap.retained_bytes_against(&s) * 6 < whole_band, "{} of {whole_band}", snap.retained_bytes_against(&s));
+    }
+
+    #[test]
+    fn rows_moved_whole_stay_shared_with_the_snapshot() {
+        let mut s = grid(300, 4);
+        let snap = s.clone();
+        // Two rows inserted at row 100, as Insert Sheet Rows does.
+        s.shift_rows(100, 2);
+        for row in (0..300).filter(|row| *row < 64 || *row >= 100) {
+            let now = if row < 100 { row } else { row + 2 };
+            assert!(Arc::ptr_eq(row_of(&snap, row), row_of(&s, now)), "row {row}");
+        }
+        assert_eq!(s.get(c(250, 1)).map(|x| x.value.clone()), Some(Value::from(24801.0)));
+        let everything = snap.retained_bytes_against(&CellStore::new());
+        let after_insert = snap.retained_bytes_against(&s);
+        assert!(after_insert * 4 < everything, "{after_insert} of {everything}");
+
+        // Two rows deleted at row 100, as Delete Sheet Rows does: the block goes, the rest moves up.
+        let mut d = snap.clone();
+        d.take_range(RangeRef::rows(100, 101));
+        d.shift_rows(102, -2);
+        for row in (0..300).filter(|row| *row < 64 || *row >= 102) {
+            let now = if row < 100 { row } else { row - 2 };
+            assert!(Arc::ptr_eq(row_of(&snap, row), row_of(&d, now)), "row {row}");
+        }
+        assert_eq!(d.len(), 298 * 4);
+        assert!(snap.retained_bytes_against(&d) * 4 < everything);
+    }
+
+    #[test]
+    fn retained_bytes_count_the_rows_a_snapshot_keeps_alone() {
+        let mut s = grid(200, 4);
+        let snap = s.clone();
+        assert_eq!(snap.retained_bytes_against(&s), 0, "nothing changed");
+        s.set(c(5, 0), Cell::value("x".into()));
+        let one_row = snap.retained_bytes_against(&s);
+        s.set(c(6, 0), Cell::value("y".into()));
+        s.set(c(150, 0), Cell::value("z".into()));
+        let three_rows = snap.retained_bytes_against(&s);
+        assert!(one_row > 0 && three_rows > one_row, "{one_row} then {three_rows}");
+        // Columns moved: every row is rewritten, and the snapshot keeps all of its own.
+        let mut shifted = snap.clone();
+        shifted.shift_cols(0, 1);
+        assert_eq!(snap.retained_bytes_against(&shifted), snap.retained_bytes_against(&CellStore::new()));
     }
 }

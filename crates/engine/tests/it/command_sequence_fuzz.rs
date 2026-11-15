@@ -43,8 +43,8 @@ const SAMPLES: [&str; 3] = ["sales", "budget", "grades"];
 /// starts dropping the oldest entries.
 const EPISODE_UNDO_DEPTH: usize = 90;
 /// Episodes also end before the engine's 128 MiB budget for what the undo history retains starts
-/// dropping the oldest entries. One step on a sheet with tens of thousands of cells in the same
-/// block of rows retains a few megabytes, so half the budget leaves room for the next step.
+/// dropping the oldest entries. A step that rewrites every row of a sheet with tens of thousands
+/// of cells retains a few megabytes, so half the budget leaves room for the next step.
 const EPISODE_UNDO_BYTES: usize = 64 * 1024 * 1024;
 /// Save and reload every this many steps (and at the end of every episode).
 const ROUNDTRIP_EVERY: usize = 10;
@@ -300,7 +300,7 @@ impl Harness {
     fn end_episode(&mut self, i: usize) -> Result<(), Failure> {
         let end = self.wb();
         let redoable = self.s.doc().expect("document").redo.len();
-        // One step can retain more than the whole byte budget (deleting rows of a sheet with
+        // One step can retain more than the whole byte budget (deleting a column of a sheet with
         // over a million cells), and the history then drops every step before it at once. Its
         // oldest step no longer starts from this episode's workbook, so undoing everything
         // can't give that workbook back and it isn't compared.
@@ -1152,14 +1152,15 @@ fn view_mode_switch_is_not_an_undo_difference() {
     }
 }
 
-/// Seed 156: the undo history is also bounded by the bytes it retains, and a sheet with tens of
-/// thousands of cells in one block of rows retains megabytes per step, so a few dozen steps reach
-/// that budget long before the step limit. An episode ends before the oldest steps are dropped;
-/// otherwise undoing everything can't give back the workbook the episode started from.
+/// Seed 156: the undo history is also bounded by the bytes it retains. A step that rewrites every
+/// row of a sheet with tens of thousands of cells (a column inserted) retains megabytes, so a few
+/// dozen such steps reach that budget long before the step limit. An episode ends before the
+/// oldest steps are dropped; otherwise undoing everything can't give back the workbook the
+/// episode started from.
 #[test]
 fn an_episode_ends_before_the_undo_byte_budget_drops_steps() {
-    let mut steps: Vec<Step> = vec![("range.fill".to_string(), json!({"input": "1", "range": "19:21"}))];
-    steps.extend((0..60).map(|i| ("cell.set".to_string(), json!({"cell": "J2", "input": i.to_string()}))));
+    let mut steps: Vec<Step> = vec![("range.fill".to_string(), json!({"input": "1", "range": "A1:J5000"}))];
+    steps.extend((0..45).map(|_| ("home.insertColumns".to_string(), json!({"cols": "B:B"}))));
     let failure = replay("sales", &steps);
     assert!(failure.is_none(), "{failure:?}");
 }
@@ -1176,15 +1177,15 @@ fn a_redo_step_the_byte_budget_dropped_is_not_a_redo_difference() {
     assert!(failure.is_none(), "{failure:?}");
 }
 
-/// Seed 93: one step on a sheet with well over a million cells retains more than the whole byte
-/// budget, so the undo history drops every step before it at once and undoing everything can't
-/// reach the workbook the episode started from.
+/// Seed 93: one step that rewrites every row of a sheet with well over a million cells (a column
+/// deleted) retains more than the whole byte budget, so the undo history drops every step before
+/// it at once and undoing everything can't reach the workbook the episode started from.
 #[test]
 fn undo_steps_one_huge_step_pushed_out_are_not_an_undo_difference() {
     let steps = [
         ("cell.set".to_string(), json!({"cell": "H2", "input": "kept"})),
         ("range.fill".to_string(), json!({"input": "1", "range": "I1:J800000"})),
-        ("home.deleteRows".to_string(), json!({"rows": "2:3"})),
+        ("home.deleteColumns".to_string(), json!({"cols": "A:A"})),
     ];
     let failure = replay("budget", &steps);
     assert!(failure.is_none(), "{failure:?}");

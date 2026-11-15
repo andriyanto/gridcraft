@@ -564,16 +564,18 @@ impl Calc {
         let mut spill_changes = Vec::new();
         let mut freed = Vec::new();
         for (key, value) in results {
-            let Some(sheet) = wb.sheet_mut(key.0) else { continue };
-            if let Some(cell) = sheet.cells.get_mut(key.1) {
-                if value == Value::Error(CellError::Spill) {
-                    self.spill_errors.insert(key);
-                } else {
-                    self.spill_errors.remove(&key);
-                }
-                if cell.value != value {
-                    cell.value = value;
-                }
+            let Some(cell) = wb.sheet(key.0).and_then(|sheet| sheet.cells.get(key.1)) else { continue };
+            if value == Value::Error(CellError::Spill) {
+                self.spill_errors.insert(key);
+            } else {
+                self.spill_errors.remove(&key);
+            }
+            // A value that came out the same is not written: writing copies the cell's row (and
+            // its sheet), which an undo snapshot would otherwise still share.
+            if cell.value != value
+                && let Some(cell) = wb.sheet_mut(key.0).and_then(|sheet| sheet.cells.get_mut(key.1))
+            {
+                cell.value = value;
             }
         }
         for key in dirty {

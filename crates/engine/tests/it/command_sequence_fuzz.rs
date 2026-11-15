@@ -28,6 +28,8 @@
 //! - `GRIDCRAFT_FUZZ_SHRINK=1`: on failure, shrink the sequence to a minimal list of commands that
 //!   still fails the same way, printed as `execute` calls ready for a regression test.
 //! - `GRIDCRAFT_FUZZ_KEEP_GOING=1`: report every failing seed instead of stopping at the first.
+//! - `GRIDCRAFT_FUZZ_TRACE=1`: print each step as it starts and how long the command and its checks
+//!   took (run with `--nocapture`), to find the step a slow seed spends its time in.
 
 use std::collections::BTreeSet;
 use std::sync::Arc;
@@ -173,10 +175,20 @@ fn run_seed(seed: u64, steps: usize) -> (&'static str, Vec<Step>, Option<Failure
     let sample = SAMPLES[(seed % SAMPLES.len() as u64) as usize];
     let mut h = Harness::new(sample);
     let mut sequence = Vec::new();
+    let trace = std::env::var_os("GRIDCRAFT_FUZZ_TRACE").is_some();
     for i in 0..steps {
         let (id, params) = generate(&mut rng, &h.s);
         sequence.push((id.clone(), params.clone()));
-        if let Err(f) = h.step(i, &id, &params) {
+        #[allow(clippy::disallowed_methods)] // a native-only test: the clock is read off wasm
+        let started = std::time::Instant::now();
+        if trace {
+            eprintln!("seed {seed} step {i}: s.execute(\"{id}\", json!({params})).ok();");
+        }
+        let r = h.step(i, &id, &params);
+        if trace {
+            eprintln!("seed {seed} step {i}: {:?}", started.elapsed());
+        }
+        if let Err(f) = r {
             return (sample, sequence, Some(f));
         }
     }
@@ -385,6 +397,23 @@ fn overlaps(a: &RangeRef, b: &RangeRef) -> bool {
     a.intersection(b).is_some()
 }
 
+/// The first two of `ranges` that overlap. A sweep down the rows: each range is compared with
+/// the ones that reach its first row, not with every other one. Merge Across on whole columns
+/// makes a million merges, and comparing them pair by pair after every step took minutes.
+fn overlapping(ranges: &[RangeRef]) -> Option<(RangeRef, RangeRef)> {
+    let mut by_row: Vec<RangeRef> = ranges.to_vec();
+    by_row.sort_by_key(|r| (r.start.row, r.start.col));
+    let mut open: Vec<RangeRef> = Vec::new();
+    for r in by_row {
+        open.retain(|o| o.end.row >= r.start.row);
+        if let Some(o) = open.iter().find(|o| overlaps(o, &r)) {
+            return Some((*o, r));
+        }
+        open.push(r);
+    }
+    None
+}
+
 fn structure_problem(wb: &Workbook, sel: &gridcraft_engine::Selection) -> Option<String> {
     if wb.sheets.is_empty() {
         return Some("no sheets left".into());
@@ -409,10 +438,8 @@ fn structure_problem(wb: &Workbook, sel: &gridcraft_engine::Selection) -> Option
                 return Some(format!("{}!{c}: array formula covers {a}", sh.name));
             }
         }
-        for (k, m) in sh.merges.iter().enumerate() {
-            if let Some(o) = sh.merges.iter().skip(k + 1).find(|o| overlaps(m, o)) {
-                return Some(format!("{}: merges {m} and {o} overlap", sh.name));
-            }
+        if let Some((m, o)) = overlapping(&sh.merges) {
+            return Some(format!("{}: merges {m} and {o} overlap", sh.name));
         }
         for (k, t) in sh.tables.iter().enumerate() {
             if !tables.insert(t.name.to_ascii_lowercase()) {
@@ -496,10 +523,20 @@ fn roundtrip_diff(wb: &Workbook) -> Result<(), String> {
             return Err(format!("{}: formulas differ after reload: {first}", x.name));
         }
     }
-    if wb.calc.mode == CalcMode::Automatic && !wb.calc.iterative {
+    if wb.calc.mode == CalcMode::Automatic && !wb.calc.iterative && !holds_typed_circ(wb) {
         value_diff(wb, &back, "an XLSX save and reload").map_or(Ok(()), Err)?;
     }
     Ok(())
+}
+
+/// Whether a cell's own value is `#CIRC!` (the result of a circular formula pasted as a value or
+/// loaded by a query). It isn't an error the file format has, and a file keeps it as 0, which is
+/// what Excel shows for a circular reference. The formulas that read the cell then give other
+/// results once the file is opened, so such a workbook is compared by its formulas only.
+fn holds_typed_circ(wb: &Workbook) -> bool {
+    let typed_circ =
+        |cell: &gridcraft_engine::model::Cell| cell.formula.is_none() && cell.py.is_none() && cell.value == Value::Error(CellError::Circ);
+    wb.sheets.iter().any(|sh| sh.cells.iter().any(|(_, cell)| typed_circ(cell)))
 }
 
 /// The Watch Window list, which is workbook state but not an edit (undo keeps it).
@@ -1192,4 +1229,40 @@ fn undo_steps_one_huge_step_pushed_out_are_not_an_undo_difference() {
     ];
     let failure = replay("budget", &steps);
     assert!(failure.is_none(), "{failure:?}");
+}
+
+/// Seed 192: Get Data from a range copies the `#CIRC!` of a circular formula as a value, and the
+/// file keeps it as 0.
+#[test]
+fn a_typed_circular_error_the_file_keeps_as_zero_is_not_a_roundtrip_difference() {
+    let steps = [
+        ("cell.set".to_string(), json!({"cell": "E8", "input": "=FILTER(C1:C20,C1:C20>2)"})),
+        ("data.fromTableRange".to_string(), json!({"range": "G:H"})),
+    ];
+    let mut h = Harness::new("sales");
+    for (i, (id, p)) in steps.iter().enumerate() {
+        h.step(i, id, p).unwrap_or_else(|f| panic!("{f:?}"));
+    }
+    // The sequence still makes what the guard is for.
+    assert!(holds_typed_circ(&h.wb()));
+    let failure = replay("sales", &steps);
+    assert!(failure.is_none(), "{failure:?}");
+}
+
+/// Merge Across on whole columns makes a merge for every row of the sheet. The overlap check is
+/// a sweep, so a million of them are checked at once; pair by pair it took minutes (seeds 45,
+/// 562, 622, 651 and 686 at 120 steps).
+#[test]
+fn the_merge_overlap_check_sweeps_a_million_merges() {
+    let cell = |row: u32, col: u32| CellRef::new(row, col);
+    let mut merges: Vec<RangeRef> = (0..MAX_ROWS).map(|row| RangeRef::new(cell(row, 0), cell(row, 2))).collect();
+    assert_eq!(overlapping(&merges), None);
+    // Tall merges side by side, and one that only touches another's corner cell.
+    let tall = [RangeRef::new(cell(0, 5), cell(900, 6)), RangeRef::new(cell(10, 7), cell(20, 9)), RangeRef::new(cell(901, 5), cell(902, 9))];
+    assert_eq!(overlapping(&tall), None);
+    assert_eq!(overlapping(&[tall[0], RangeRef::new(cell(900, 6), cell(905, 8))]).map(|(a, _)| a), Some(tall[0]));
+    // One overlap among the million, whatever the order they are stored in.
+    merges.insert(17, RangeRef::new(cell(500_000, 2), cell(500_001, 3)));
+    let found = overlapping(&merges).map(|(a, b)| (a.to_string(), b.to_string()));
+    assert_eq!(found, Some(("A500001:C500001".to_string(), "C500001:D500002".to_string())));
 }

@@ -85,6 +85,21 @@ pub fn precedents(wb: &Workbook, sheet: usize, e: &Expr) -> (Vec<Area>, bool) {
     (out, dynamic)
 }
 
+/// Whether the formula's result depends on which rows are hidden or filtered out: it calls
+/// SUBTOTAL or AGGREGATE, the functions that can leave such rows out. Hiding, showing or filtering
+/// rows changes no cell, so these formulas are the ones to calculate again when that happens.
+pub fn reads_hidden_rows(e: &Expr) -> bool {
+    let mut found = false;
+    e.walk(&mut |x| {
+        if let Expr::Call(n, _) = x
+            && matches!(n.as_str(), "SUBTOTAL" | "AGGREGATE")
+        {
+            found = true;
+        }
+    });
+    found
+}
+
 fn is_special(n: &str) -> bool {
     matches!(
         n,

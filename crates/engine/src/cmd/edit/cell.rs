@@ -324,7 +324,14 @@ pub(super) fn range_fill(s: &mut Session, p: &Json) -> Result<Json> {
     let sheet = target_sheet(s, p)?;
     let ranges = target_ranges(s, p)?;
     let input = str_param(p, "input").unwrap_or("").to_string();
-    let origin = s.doc()?.selection.active;
+    // A formula is the one typed in the active cell, and the other cells get it moved with
+    // them (Ctrl+Enter). A caller that names a range the active cell is not in writes the formula
+    // for that range's first cell: moved from wherever the active cell happens to be, `=SUM(A1:J1)`
+    // filled down column K from an active cell in A1 would read `=SUM(K1:T1)`.
+    let d = s.doc()?;
+    let active = d.selection.active;
+    let on_target = sheet == d.wb.active_sheet() && ranges.iter().any(|r| r.contains(active));
+    let origin = if on_target { active } else { ranges.first().map_or(active, |r| r.start) };
     edit(s, |cx| {
         // Each cell gets what typing the input there gives: the automatic number format where
         // it's General, its own format otherwise, text where it's Text. That depends only on

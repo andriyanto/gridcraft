@@ -78,7 +78,7 @@ fn a_fill_of_spilling_formulas_leaves_no_stale_spill_error() {
         "sales",
         &[
             ("selection.set", json!({"range":"C20:D26"})),
-            ("range.fill", json!({"input":"=SORT(B16:D20)","range":"K14:K19"})),
+            ("range.fill", json!({"input":"=SORT(J10:L14)","range":"K14:K19"})),
             ("cell.set", json!({"cell":"K68","input":"=B11*A8"})),
         ],
     );
@@ -91,7 +91,7 @@ fn a_fill_over_spilled_values_recalculates_what_read_them() {
         "sales",
         &[
             ("range.setValues", json!({"range":"F15","values":[[true,"=1/0","43"],[-1,"=F10#","=D5:H8"]]})),
-            ("range.fill", json!({"input":"=D22:F27","range":"H12:L15"})),
+            ("range.fill", json!({"input":"=K33:M38","range":"H12:L15"})),
         ],
     );
     assert!(diff.is_empty(), "{diff:#?}");
@@ -105,7 +105,7 @@ fn spilled_arrays_keep_their_place_through_a_save_and_reload() {
         "sales",
         &[
             ("range.setValues", json!({"range":"F15","values":[[true,"=1/0","43"],[-1,"=F10#","=D5:H8"]]})),
-            ("range.fill", json!({"input":"=D22:F27","range":"H12:L15"})),
+            ("range.fill", json!({"input":"=K33:M38","range":"H12:L15"})),
         ],
     );
     assert!(diff.is_empty(), "{diff:#?}");

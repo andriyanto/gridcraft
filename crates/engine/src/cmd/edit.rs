@@ -55,7 +55,7 @@ pub fn specs() -> Vec<CommandSpec> {
             "Fill Range With Input",
             [],
             Some("Ctrl+Enter"),
-            "{range?, input}: enters the same input in every selected cell (relative formulas adjust)",
+            "{range?, input}: enters the same input in every selected cell. A formula is written for the active cell when that is one of them, otherwise for the range's first cell; its relative references move with each cell",
             has_doc,
             range_fill
         ),

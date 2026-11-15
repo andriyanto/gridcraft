@@ -9,18 +9,33 @@ use super::{
 pub(super) fn toggle_filter(s: &mut Session, p: &Json) -> Result<Json> {
     let (sheet, r) = data_target(s, p, "data.filter")?;
     crate::cmd::refuse_unless_allowed(s, sheet, "Filtering", |p| p.autofilter)?;
-    // The active cell belongs to the active sheet: on another sheet the table is the one at `range`.
-    let at = if sheet == s.doc()?.wb.active_sheet() { s.doc()?.selection.active } else { r.start };
+    // The active cell belongs to the active sheet: on another sheet the table is the one at
+    // `range`, and so it is when the caller names a range (the active cell may be in another table).
+    let at = if sheet == s.doc()?.wb.active_sheet() && p.get("range").is_none() { s.doc()?.selection.active } else { r.start };
     let has = s.doc()?.wb.sheet(sheet).is_some_and(|sh| sh.autofilter.is_some());
     let in_table = s.doc()?.wb.sheet(sheet).and_then(|sh| sh.table_at(at).map(|t| t.name.clone()));
     if let Some(name) = in_table {
         return edit(s, |cx| {
             let sh = cx.sheet_mut(sheet)?;
-            if let Some(t) = sh.tables.iter_mut().find(|t| t.name == name) {
-                t.filter_button = !t.filter_button;
-                if !t.filter_button {
-                    t.filter.clear();
+            let Some(t) = sh.tables.iter_mut().find(|t| t.name == name) else { return Ok(Json::Null) };
+            t.filter_button = !t.filter_button;
+            if t.filter_button {
+                return Ok(Json::Null);
+            }
+            t.filter.clear();
+            // The table's filter is the sheet filter over it, and a file keeps it in the table's
+            // own buttons. Without the buttons it would stay in force here and be gone from the
+            // saved file, its rows still hidden: it goes with them, and the rows come back.
+            let table = t.range;
+            if sh.autofilter.as_ref().is_some_and(|af| table.contains_range(&af.range)) {
+                let filtered: Vec<u32> = sh.rows.keys().copied().filter(|r| sh.is_row_filtered(*r)).collect();
+                sh.autofilter = None;
+                for r in filtered {
+                    if let Some(info) = sh.rows.get_mut(&r) {
+                        info.hidden = false;
+                    }
                 }
+                cx.rows_shown_or_hidden = true; // SUBTOTAL depends on filtered rows
             }
             Ok(Json::Null)
         });
@@ -55,8 +70,24 @@ fn install_filter(s: &mut Session, p: &Json) -> Result<Json> {
             r = RangeRef::new(r.start, CellRef::new(below, r.end.col));
         }
     }
+    // A filter that lands on a table is the table's own: it covers the table's header and data
+    // rows, and the table shows its filter buttons. A sheet filter lying over a table can't be
+    // saved (a file has no place for it), so it used to be lost on save with its rows left hidden.
+    let table = s.doc()?.wb.sheet(sheet).and_then(|sh| sh.tables.iter().find(|t| t.header_row && t.range.intersects(&r))).map(|t| {
+        let last = t.data_range().map_or(t.range.start.row, |d| d.end.row);
+        (t.name.clone(), RangeRef::new(t.range.start, CellRef::new(last, t.range.end.col)))
+    });
+    if let Some((_, over)) = &table {
+        r = *over;
+    }
     edit(s, |cx| {
-        cx.sheet_mut(sheet)?.autofilter = Some(AutoFilter { range: r, criteria: vec![] });
+        let sh = cx.sheet_mut(sheet)?;
+        sh.autofilter = Some(AutoFilter { range: r, criteria: vec![] });
+        if let Some((name, _)) = &table
+            && let Some(t) = sh.tables.iter_mut().find(|t| &t.name == name)
+        {
+            t.filter_button = true;
+        }
         Ok(json!({"filter": true, "range": r.a1()}))
     })
 }

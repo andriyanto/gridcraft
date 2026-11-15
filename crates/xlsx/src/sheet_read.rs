@@ -379,7 +379,23 @@ pub fn read_sheet(cx: &mut Ctx<'_>, part: &str, name: &str) -> Result<(Sheet, cr
             }
         }
     }
+    adopt_table_filter(&mut sheet);
     Ok((sheet, read_controls))
+}
+
+/// A filtered table's criteria become the sheet's filter: that is the one filter the engine keeps
+/// in force, and the writer folds its criteria back into the table. Left in the table as read,
+/// they hid their rows but could not be cleared or changed, and a save kept them in place of the
+/// criteria set since. A sheet has one filter, so the first filtered table gets it; another
+/// filtered table on the same sheet keeps its criteria as read.
+fn adopt_table_filter(sheet: &mut Sheet) {
+    if sheet.autofilter.is_some() {
+        return;
+    }
+    let Some(table) = sheet.tables.iter_mut().find(|t| t.header_row && t.filter_button && !t.filter.is_empty()) else { return };
+    let last = table.data_range().map_or(table.range.start.row, |data| data.end.row);
+    let range = RangeRef::new(table.range.start, CellRef::new(last, table.range.end.col));
+    sheet.autofilter = Some(gridcraft_model::AutoFilter { range, criteria: std::mem::take(&mut table.filter) });
 }
 
 /// Buttons, scroll bars and spin buttons: the `<controls>` list (also inside

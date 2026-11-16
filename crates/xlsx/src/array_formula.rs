@@ -448,9 +448,9 @@ impl<'a> Legacy<'a> {
         let inner = |wanted: Ctx| if ctx == Ctx::Array { Ctx::Array } else { wanted };
         match e {
             Expr::Ref(r) => {
-                let one_cell_range = r.range().is_single() && !matches!(r.sheet, SheetSel::Span(_, _)) && matches!(r.kind, RefKind::Range(..));
+                let one_cell_range = r.range().is_single() && !matches!(r.sheet, SheetSel::Span(_)) && matches!(r.kind, RefKind::Range(..));
                 self.one_cell_range |= one_cell_range;
-                let single = r.range().is_single() && !matches!(r.sheet, SheetSel::Span(_, _)) && !(self.collapsed && one_cell_range);
+                let single = r.range().is_single() && !matches!(r.sheet, SheetSel::Span(_)) && !(self.collapsed && one_cell_range);
                 (Expr::Ref(r), if single { Kind::Scalar } else { Kind::Ref })
             }
             Expr::Array(rows) => {

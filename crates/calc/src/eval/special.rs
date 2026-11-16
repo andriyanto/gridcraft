@@ -39,7 +39,8 @@ pub fn precedents(wb: &Workbook, sheet: usize, e: &Expr) -> (Vec<Area>, bool) {
                 out.push(Area { sheet: i, range });
             }
         }
-        SheetSel::Span(a, b) => {
+        SheetSel::Span(span) => {
+            let (a, b) = &**span;
             if let (Some(i), Some(j)) = (wb.sheet_index(a), wb.sheet_index(b)) {
                 for s in i.min(j)..=i.max(j) {
                     out.push(Area { sheet: s, range });

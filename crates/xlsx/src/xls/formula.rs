@@ -159,7 +159,7 @@ impl Links {
         let name = |i: i16| usize::try_from(i).ok().and_then(|i| self.sheets.get(i)).cloned();
         Ok(match (name(x.first), name(x.last)) {
             (Some(a), Some(_)) if x.first == x.last => Some(SheetSel::Named(a)),
-            (Some(a), Some(b)) => Some(SheetSel::Span(a, b)),
+            (Some(a), Some(b)) => Some(SheetSel::span(a, b)),
             // A deleted sheet: the reference is #REF!.
             _ => None,
         })

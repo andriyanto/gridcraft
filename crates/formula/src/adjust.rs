@@ -279,7 +279,8 @@ pub fn rename_sheet(e: Expr, old: &str, new: &str) -> Expr {
         Expr::Ref(mut r) => {
             match &mut r.sheet {
                 SheetSel::Named(n) if n.eq_ignore_ascii_case(old) => *n = new.to_string(),
-                SheetSel::Span(a, b) => {
+                SheetSel::Span(span) => {
+                    let (a, b) = &mut **span;
                     if a.eq_ignore_ascii_case(old) {
                         *a = new.to_string();
                     }
@@ -308,7 +309,8 @@ pub fn delete_sheet(e: Expr, name: &str, order: &[String]) -> Expr {
     e.map(&mut |x| match x {
         Expr::Ref(r) if r.sheet_name().is_some_and(|n| n.eq_ignore_ascii_case(name)) => Expr::Error(CellError::Ref),
         Expr::Ref(mut r) => {
-            if let SheetSel::Span(a, b) = &r.sheet
+            if let SheetSel::Span(span) = &r.sheet
+                && let (a, b) = &**span
                 && (a.eq_ignore_ascii_case(name) || b.eq_ignore_ascii_case(name))
             {
                 let (Some(ia), Some(ib)) = (pos(a), pos(b)) else { return Expr::Ref(r) };
@@ -319,7 +321,7 @@ pub fn delete_sheet(e: Expr, name: &str, order: &[String]) -> Expr {
                 let inward = |from: usize, to: usize| order.get(if from < to { from + 1 } else { from.saturating_sub(1) });
                 let (na, nb) = if a.eq_ignore_ascii_case(name) { (inward(ia, ib), order.get(ib)) } else { (order.get(ia), inward(ib, ia)) };
                 let (Some(na), Some(nb)) = (na, nb) else { return Expr::Error(CellError::Ref) };
-                r.sheet = if na.eq_ignore_ascii_case(nb) { SheetSel::Named(na.clone()) } else { SheetSel::Span(na.clone(), nb.clone()) };
+                r.sheet = if na.eq_ignore_ascii_case(nb) { SheetSel::Named(na.clone()) } else { SheetSel::span(na.clone(), nb.clone()) };
             }
             Expr::Ref(r)
         }

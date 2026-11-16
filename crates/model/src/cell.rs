@@ -27,18 +27,26 @@ pub struct Formula {
     pub dynamic: bool,
 }
 
+/// The text of `e`, without the room the string kept from growing as it was written: a filled
+/// column holds one of these per cell.
+fn printed(e: &Expr) -> String {
+    let mut text = gridcraft_formula::print(e);
+    text.shrink_to_fit();
+    text
+}
+
 impl Formula {
     /// Parses `text` (with or without `=`). Unparseable formulas keep their text and evaluate to
     /// `#NAME?`.
     pub fn new(text: &str) -> Formula {
         let body = text.strip_prefix('=').unwrap_or(text);
         match gridcraft_formula::parse(body) {
-            Ok(e) => Formula { text: gridcraft_formula::print(&e), expr: Some(Arc::new(e)), array: None, dynamic: false },
+            Ok(e) => Formula { text: printed(&e), expr: Some(Arc::new(e)), array: None, dynamic: false },
             Err(_) => Formula { text: body.to_string(), expr: None, array: None, dynamic: false },
         }
     }
     pub fn from_expr(e: Expr) -> Formula {
-        Formula { text: gridcraft_formula::print(&e), expr: Some(Arc::new(e)), array: None, dynamic: false }
+        Formula { text: printed(&e), expr: Some(Arc::new(e)), array: None, dynamic: false }
     }
     /// The parsed expression, re-parsing when no tree is cached.
     pub fn expr(&self) -> Option<Expr> {
@@ -156,6 +164,17 @@ impl Cell {
 mod tests {
     use super::*;
     use gridcraft_core::CellRef;
+
+    /// A filled column holds one text per cell: it keeps no room left from being written.
+    #[test]
+    fn a_formula_text_keeps_no_unused_room() {
+        for text in ["=A1", "=VLOOKUP(A1,$A$1:$K$20000,11,FALSE)+K1", "=IF(K1>L1,K1,L1)&\"x\""] {
+            let f = Formula::new(text);
+            assert_eq!(f.text.capacity(), f.text.len(), "{text}");
+            let shifted = Formula::from_expr(f.expr().expect("parses"));
+            assert_eq!(shifted.text.capacity(), shifted.text.len(), "{text}, from its tree");
+        }
+    }
 
     #[test]
     fn formulas_read_from_json_keep_their_text_and_cache_the_tree() -> Result<(), serde_json::Error> {

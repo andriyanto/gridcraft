@@ -274,6 +274,9 @@ impl Parser {
         if args.len() > 255 {
             return Err(self.err("too many arguments"));
         }
+        // A list grown one argument at a time holds room for four: `SUM(A1:A9)` kept three unused
+        // slots the size of an expression each, in every cell of a filled column.
+        args.shrink_to_fit();
         Ok(args)
     }
 
@@ -330,7 +333,7 @@ impl Parser {
             }
             Tok::Sheet(a, b) => {
                 let sheet = match b {
-                    Some(b) => SheetSel::Span(a, b),
+                    Some(b) => SheetSel::span(a, b),
                     None => SheetSel::Named(a),
                 };
                 match self.next() {
@@ -345,11 +348,11 @@ impl Parser {
                 {
                     let pos = self.pos();
                     let Tok::Struct(body) = self.next() else { return Err(self.err("internal")) };
-                    return parse_struct(&w, &body).map(Expr::Struct).map_err(|msg| ParseError { msg, pos });
+                    return parse_struct(&w, &body).map(|st| Expr::Struct(Box::new(st))).map_err(|msg| ParseError { msg, pos });
                 }
                 self.reference_from_word(SheetSel::Current, &w)
             }
-            Tok::Struct(body) => parse_struct("", &body).map(Expr::Struct).map_err(|msg| self.err(msg)),
+            Tok::Struct(body) => parse_struct("", &body).map(|st| Expr::Struct(Box::new(st))).map_err(|msg| self.err(msg)),
             t => Err(self.err(format!("unexpected {}", describe(&t)))),
         }
     }
@@ -458,6 +461,8 @@ impl Parser {
         if rows.iter().any(|r| r.len() != w) {
             return Err(self.err("array rows must have the same length"));
         }
+        rows.iter_mut().for_each(Vec::shrink_to_fit);
+        rows.shrink_to_fit();
         Ok(Expr::Array(rows))
     }
 }

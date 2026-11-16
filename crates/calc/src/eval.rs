@@ -173,6 +173,9 @@ pub struct Evaluator<'h> {
     /// runs out of work after the same number of calls that a legitimately wide one could
     /// make, instead of an amount of work that squares with array nesting (#2382).
     fuel: u64,
+    /// The defined names being evaluated, outermost first (each by where the workbook holds
+    /// it). A name met again while it is being evaluated refers to itself: see `name`.
+    names: Vec<usize>,
 }
 
 struct FnCtx<'a, 'h> {
@@ -221,6 +224,7 @@ impl Ctx for FnCtx<'_, '_> {
             calls: self.ev.calls,
             stack_top: self.ev.stack_top,
             fuel: self.ev.fuel,
+            names: self.ev.names.clone(),
         };
         let v = matches!(ev.value(&shifted).scalar().to_bool(), Ok(true));
         // The child's spend counts against this cell's budget.
@@ -247,7 +251,7 @@ impl Ctx for FnCtx<'_, '_> {
 
 impl<'h> Evaluator<'h> {
     pub fn new(host: &'h mut dyn Host, sheet: usize, at: CellRef) -> Self {
-        Evaluator { host, sheet, at, env: Vec::new(), depth: 0, calls: 0, stack_top: 0, fuel: LAMBDA_FUEL }
+        Evaluator { host, sheet, at, env: Vec::new(), depth: 0, calls: 0, stack_top: 0, fuel: LAMBDA_FUEL, names: Vec::new() }
     }
 
     /// Evaluates to a value (references are dereferenced; multi-cell → array).
@@ -410,6 +414,15 @@ impl<'h> Evaluator<'h> {
             None => (self.sheet, n),
         };
         if let Some(def) = wb.name(bare, scope_sheet) {
+            // A name that refers to itself, directly (`Total = Total+1`) or through other names
+            // (`A = B`, `B = A`), is a circular reference like a cell's, and gets the same
+            // error. It used to be evaluated again and again until the nesting limit answered
+            // `#NUM!`. A LAMBDA name that calls itself is not one: its body runs when the
+            // function is called, after the name has given the function.
+            let id = std::ptr::from_ref(def) as usize;
+            if self.names.contains(&id) {
+                return err(CellError::Circ);
+            }
             let text = def.formula.clone();
             let scope = def.scope.unwrap_or(self.sheet);
             return match gridcraft_formula::parse_name(&text) {
@@ -424,7 +437,9 @@ impl<'h> Evaluator<'h> {
                     let saved = self.sheet;
                     // Unqualified references in a name refer to the scope sheet.
                     self.sheet = scope;
+                    self.names.push(id);
                     let r = self.eval(&expr);
+                    self.names.pop();
                     self.sheet = saved;
                     r
                 }

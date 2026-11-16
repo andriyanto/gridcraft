@@ -6,12 +6,22 @@
 #![deny(clippy::unwrap_used, clippy::expect_used, clippy::panic, clippy::unimplemented, clippy::todo, clippy::unreachable)]
 #![forbid(unsafe_code)]
 
+/// The GitHub repository this GridCraft's releases come from: the only place it looks for a newer
+/// version, and the only place an update is downloaded from. This copy is developed on its own,
+/// so that is its own repository, not the one craft-update lists for the Craft App Suite: a build
+/// of this code offered the releases of the project it was copied from.
+#[cfg(not(target_arch = "wasm32"))]
+pub const UPDATE_REPO: &str = "andriyanto/gridcraft";
+
 /// GridCraft as craft-update knows it, with its 128 px icon and accent colour: the update
-/// prompt shows both, and an AppImage's menu entry gets the icon.
+/// prompt shows both, and an AppImage's menu entry gets the icon. Its releases, and who the
+/// prompt says they are by, are this repository's ([`UPDATE_REPO`]).
 #[cfg(not(target_arch = "wasm32"))]
 pub const UPDATE_APP: craft_update::app::App = craft_update::app::App {
     icon_png: Some(include_bytes!("../../../assets/app-icon/hicolor/128x128/apps/ai.storyteller.gridcraft.png")),
     accent: Some([0x1f, 0x9d, 0x55]),
+    repo: UPDATE_REPO,
+    developer: "andriyanto",
     ..craft_update::suite::GRIDCRAFT
 };
 

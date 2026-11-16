@@ -16,6 +16,9 @@
 //!   top-left cell, the selection on the sheet;
 //! - a full recalculation from scratch gives the values the incremental recalculation left
 //!   (catches stale dependency graphs);
+//! - the dependency graph the edits kept up to date is the one built from the workbook: each
+//!   formula reads the same cells and each cell is read by the same formulas (catches a graph
+//!   that is wrong before a later edit shows it as a stale value);
 //! - every few steps and at the end, an XLSX save and reload (with the recalculation opening does)
 //!   gives the same sheets, formulas and values;
 //! - at the end, undoing everything gives back the starting workbook and redoing everything the
@@ -259,6 +262,11 @@ impl Harness {
     fn new(sample: &str) -> Harness {
         let mut s = Session::new();
         s.execute("file.new", json!({"sample": sample})).expect("sample opens");
+        // Inserting or deleting rows, columns or cells updates the graph formula by formula on
+        // every sheet here. Left to itself it starts over on the sheet that holds most of the
+        // formulas, which the samples' one sheet always is: the path that needs the checks
+        // would never run.
+        s.doc_mut().expect("document").calc.always_scoped = true;
         let base = s.doc().expect("document").wb.clone();
         Harness { s, base }
     }
@@ -304,7 +312,8 @@ impl Harness {
             return Err(fail(i, "structure", e));
         }
         let wb = d.wb.clone();
-        guarded(i, "recalc", || recalc_diff(&wb))
+        guarded(i, "recalc", || recalc_diff(&wb))?;
+        guarded(i, "graph", || graph_diff(&wb, &d.calc))
     }
 
     /// Undo everything, compare with the start, redo everything, compare with the end, then save
@@ -498,6 +507,38 @@ fn recalc_diff(wb: &Workbook) -> Result<(), String> {
     let mut fresh = wb.clone();
     Calc::new().recalc_all(&mut fresh);
     value_diff(wb, &fresh, "a full recalc").map_or(Ok(()), Err)
+}
+
+/// The dependency graph the edits kept up to date must be the one built from the workbook: a
+/// formula entered with the wrong references, or left behind where its cell used to be, gives
+/// the right values now and stale ones after a later edit.
+fn graph_diff(wb: &Workbook, calc: &Calc) -> Result<(), String> {
+    let mut fresh = Calc::new();
+    fresh.rebuild(wb);
+    if calc.graph.len() != fresh.graph.len() {
+        return Err(format!("{} formulas in the graph, {} after a rebuild", calc.graph.len(), fresh.graph.len()));
+    }
+    let (mut kept, mut built) = (Vec::new(), Vec::new());
+    for (si, sh) in wb.sheets.iter().enumerate() {
+        for (c, cell) in sh.cells.iter() {
+            if cell.formula.is_some() && calc.graph.precedents_of((si, c)) != fresh.graph.precedents_of((si, c)) {
+                let (a, b) = (calc.graph.precedents_of((si, c)), fresh.graph.precedents_of((si, c)));
+                return Err(format!("{}!{c}: reads {a:?} in the graph, {b:?} after a rebuild", sh.name));
+            }
+            kept.clear();
+            built.clear();
+            calc.graph.dependents(si, c, &mut kept);
+            fresh.graph.dependents(si, c, &mut built);
+            for list in [&mut kept, &mut built] {
+                list.sort_unstable_by_key(|(s, k)| (*s, k.row, k.col));
+                list.dedup();
+            }
+            if kept != built {
+                return Err(format!("{}!{c}: read by {kept:?} in the graph, by {built:?} after a rebuild", sh.name));
+            }
+        }
+    }
+    Ok(())
 }
 
 fn normalized_formula(f: &Formula) -> String {

@@ -161,7 +161,7 @@ pub(crate) fn sync_headers(cx: &mut crate::cmd::Ctx) {
         .map(|(si, r)| (si, RangeRef::new(r.start, CellRef::new(r.start.row, r.end.col))))
         .collect();
     // A structural edit can move anything into a header row: then every header is checked.
-    let changed: std::collections::BTreeSet<(usize, CellRef)> = if cx.structural {
+    let changed: std::collections::BTreeSet<(usize, CellRef)> = if cx.is_structural() {
         heads.iter().flat_map(|(s, r)| r.iter().map(move |c| (*s, c))).collect()
     } else {
         cx.changed.iter().filter(|(si, c)| heads.iter().any(|(s, r)| s == si && r.contains(*c))).copied().collect()

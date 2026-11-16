@@ -1,6 +1,6 @@
 # Architecture
 
-> **Last reviewed:** 2026-10-10 · **Last updated:** 2026-11-15 · **Change:** minor (whole columns read as an array are bounded by the formula's own references; earlier: hiding and filtering rows recalculates only what depends on hidden rows; earlier: cell store rows shared one by one; earlier: shared CJK fallback baselines; earlier: Python mode in the formula bar; earlier: Python cells as data; earlier: equations: the `math` crate and the layout cache; earlier: recently used functions kept in the preferences; Function Library module; accent icons; earlier: the hidden names that hold macros) · **Target:** Microsoft Excel (Microsoft 365)
+> **Last reviewed:** 2026-10-10 · **Last updated:** 2026-11-16 · **Change:** minor (inserting and deleting rows, columns and cells recalculates the sheet edited and its readers; earlier: whole columns read as an array are bounded by the formula's own references; earlier: hiding and filtering rows recalculates only what depends on hidden rows; earlier: cell store rows shared one by one; earlier: shared CJK fallback baselines; earlier: Python mode in the formula bar; earlier: Python cells as data; earlier: equations: the `math` crate and the layout cache; earlier: recently used functions kept in the preferences; Function Library module; accent icons; earlier: the hidden names that hold macros) · **Target:** Microsoft Excel (Microsoft 365)
 
 How GridCraft is built today. Rules for contributors are in [`AGENTS.md`](../AGENTS.md).
 
@@ -45,7 +45,7 @@ including tests, 2026-10-10.
 3. **Recalc** marks dependents of changed cells dirty through the dependency graph (with range
    nodes for range dependents), evaluates in topological order, spills dynamic arrays and reports
    `#SPILL!`/cycles. Volatile functions are always dirty.
-   An edit that moves cells (rows, columns, sheets) recalculates every formula. One that only hides, shows or filters rows recalculates the formulas that depend on hidden rows (`SUBTOTAL`, `AGGREGATE`) and what reads them: `Ctx::rows_shown_or_hidden`, `Calc::rows_shown_or_hidden`.
+   Inserting or deleting rows, columns or cells recalculates the sheet whose cells moved, the formulas on other sheets that read that sheet, and what reads those (`Ctx::restructured`, `Calc::sheets_restructured`); when that is half the formulas of the workbook or more, and for every other edit that moves cells (sheets, tables, cut and paste), every formula is recalculated. An edit that only hides, shows or filters rows (slicers and Advanced Filter included) recalculates the formulas that depend on hidden rows (`SUBTOTAL`, `AGGREGATE`) and what reads them: `Ctx::rows_shown_or_hidden`, `Calc::rows_shown_or_hidden`.
 4. **Rendering**: the egui grid reads display values (number formats applied in `engine/display.rs`)
    for the visible window only; charts render through `crates/chart` primitives.
 5. **Files**: `engine/io.rs` sniffs content (XLSX, XLSB, ODS) before trusting the extension and
@@ -243,6 +243,7 @@ rpm, tarball), FreeBSD, and web (WASM; WebGPU or WebGL2). Release workflows in
 
 | Date | Change | Summary |
 |---|---|---|
+| 2026-11-16 | minor | Recalculation: inserting or deleting rows, columns or cells recalculates the sheet edited and what reads it from other sheets, instead of every formula in the workbook, unless that is most of the workbook (`Calc::sheets_restructured`). A slicer and Advanced Filter in place recalculate only the formulas that depend on hidden rows, as a filter does. |
 | 2026-11-15 | minor | Recalculation: a whole column or row read as an array is cut down by `Host::trim_end`. During a recalculation the bound comes from the filled cells of the formula's own whole-column and whole-row references, so every cell that can move it is one the dependency graph already tracks for that formula; the sheet's used range, which it came from before, changes without the formula being recalculated. |
 | 2026-11-15 | minor | Recalculation: hiding, showing, grouping and filtering rows, and setting a row's height, recalculate only the formulas that call `SUBTOTAL` or `AGGREGATE` and what reads them, instead of every formula in the workbook (`Calc::rows_shown_or_hidden`). |
 | 2026-11-15 | minor | Cell store: each row of a band sits behind its own `Arc`. An edit copies the cell's row instead of its 64-row band, and rows moved whole by a row insert or delete stay shared with the undo snapshot, so an undo step retains kilobytes where it retained megabytes. |

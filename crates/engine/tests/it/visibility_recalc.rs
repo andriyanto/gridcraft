@@ -151,3 +151,39 @@ fn manual_calculation_still_recalculates_everything_when_rows_are_hidden() {
     run(&mut s, "home.hideRows", json!({"rows": "3:4"}));
     assert_eq!((number(&s, "C5"), number(&s, "C1")), (155.0, 150.0), "hiding rows recalculates the workbook, as it did");
 }
+
+/// A slicer filters its table's rows, and Advanced Filter hides the rows that don't match, the
+/// way a filter does: they recalculated every formula too.
+#[test]
+fn slicers_and_the_advanced_filter_calculate_only_what_depends_on_hidden_rows() {
+    let mut s = sheet();
+    run(&mut s, "selection.set", json!({"range": "E1:E500"}));
+    run(&mut s, "range.fill", json!({"input": "=ROW()*2+$A$2"}));
+    run(&mut s, "home.formatAsTable", json!({"range": "A1:B11"}));
+    run(&mut s, "selection.set", json!({"range": "A2"}));
+    run(&mut s, "insert.slicer", json!({"column": "kind", "at": "G2"}));
+    let calculated = |s: &Session| s.doc().unwrap().calc.last_recalc_cells;
+    let steps: Vec<(&str, Json, f64)> = vec![
+        ("slicer.toggle", json!({"value": "even"}), 30.0),
+        ("slicer.toggle", json!({"value": "odd"}), 25.0),
+        ("slicer.toggle", json!({"value": "even", "multi": true}), 55.0),
+        ("slicer.toggle", json!({"value": "odd"}), 25.0),
+        ("slicer.clear", json!({}), 55.0),
+        ("slicer.toggle", json!({"value": "even"}), 30.0),
+        ("slicer.delete", json!({}), 55.0),
+    ];
+    for (i, (id, params, visible_sum)) in steps.into_iter().enumerate() {
+        run(&mut s, id, params);
+        assert_eq!(number(&s, "C1"), visible_sum, "step {i}, {id}: the sum of the visible rows");
+        assert_eq!(number(&s, "C4"), visible_sum * 2.0, "step {i}, {id}: what reads it");
+        assert_eq!(number(&s, "C5"), 55.0, "step {i}, {id}: SUM reads every row");
+        assert!(calculated(&s) < 50, "step {i}, {id}: {} formulas calculated", calculated(&s));
+        assert_eq!(stale(&s), Vec::<String>::new(), "step {i}, {id}");
+    }
+    // Advanced Filter in place: the rows where n is over 6.
+    run(&mut s, "range.setValues", json!({"range": "J1", "values": [["n"], [">6"]]}));
+    run(&mut s, "data.advancedFilter", json!({"range": "A1:B11", "criteria": "J1:J2"}));
+    assert_eq!((number(&s, "C1"), number(&s, "C4"), number(&s, "C5")), (34.0, 68.0, 55.0));
+    assert!(calculated(&s) < 50, "{} formulas calculated", calculated(&s));
+    assert_eq!(stale(&s), Vec::<String>::new());
+}

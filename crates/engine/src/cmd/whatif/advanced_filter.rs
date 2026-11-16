@@ -224,7 +224,8 @@ pub(super) fn advanced_filter(s: &mut Session, p: &Json) -> Result<Json> {
                 shm.rows.entry(*row).or_default().hidden = true;
             }
         }
-        cx.structural = true;
+        // Rows are filtered in or out; no cell moves (see `Ctx::rows_shown_or_hidden`).
+        cx.rows_shown_or_hidden = true;
         Ok(())
     })?;
     Ok(json!({"matched": matched, "hiddenRows": hidden}))

@@ -199,7 +199,8 @@ fn slicer_toggle(s: &mut Session, p: &Json) -> Result<Json> {
             sl.selected = new_selected;
         }
         reapply_slicer(&mut cx.wb, sheet, id);
-        cx.structural = true;
+        // Rows are filtered in or out; no cell moves (see `Ctx::rows_shown_or_hidden`).
+        cx.rows_shown_or_hidden = true;
         Ok(Json::Null)
     })
 }
@@ -212,7 +213,8 @@ fn slicer_select_all(s: &mut Session, p: &Json) -> Result<Json> {
             sl.selected = None;
         }
         reapply_slicer(&mut cx.wb, sheet, id);
-        cx.structural = true;
+        // Rows are filtered in or out; no cell moves (see `Ctx::rows_shown_or_hidden`).
+        cx.rows_shown_or_hidden = true;
         Ok(Json::Null)
     })
 }
@@ -236,7 +238,7 @@ fn slicer_delete(s: &mut Session, p: &Json) -> Result<Json> {
             af.criteria.retain(|(o, _)| *o != off);
         }
         super::data::apply_filter(&mut cx.wb, sheet);
-        cx.structural = true;
+        cx.rows_shown_or_hidden = true;
         Ok(Json::Null)
     })
 }

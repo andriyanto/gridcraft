@@ -58,6 +58,10 @@ pub struct Calc {
     /// leads to them; `rows_shown_or_hidden` starts from this set. Filled in `rebuild`, kept up
     /// to date by `cells_changed`.
     hidden_row_readers: HashSet<Key>,
+    /// For tests: `sheets_restructured` always updates the graph formula by formula. Otherwise it
+    /// starts over when the sheets hold or feed half the formulas of the workbook, which is quicker
+    /// and gives the same graph and values.
+    pub always_scoped: bool,
 }
 
 /// A set of cells by row, each row's columns in their own set: a window of rows and columns is
@@ -75,6 +79,11 @@ impl SpillErrors {
 
     fn clear(&mut self) {
         self.rows.clear();
+    }
+
+    /// Forgets every cell of `sheet`.
+    fn clear_sheet(&mut self, sheet: usize) {
+        self.rows.retain(|(s, _), _| *s != sheet);
     }
 
     fn insert(&mut self, (sheet, c): Key) {
@@ -108,6 +117,7 @@ impl Default for Calc {
             last_recalc_cells: 0,
             spill_errors: SpillErrors::default(),
             hidden_row_readers: HashSet::default(),
+            always_scoped: false,
         }
     }
 }
@@ -196,31 +206,39 @@ impl Calc {
         self.hidden_row_readers.clear();
         for (si, sheet) in wb.sheets.iter().enumerate() {
             for (c, cell) in sheet.cells.iter() {
-                if cell.value == Value::Error(CellError::Spill) {
-                    self.spill_errors.insert((si, c));
-                }
-                if let Some(f) = &cell.formula
-                    && let Some((areas, dynamic, hidden_rows)) = f.with_expr(|e| {
-                        let (areas, dynamic) = precedents(wb, si, e);
-                        (areas, dynamic, reads_hidden_rows(e))
-                    })
-                {
-                    self.graph.insert((si, c), Node { areas, dynamic });
-                    if hidden_rows {
-                        self.hidden_row_readers.insert((si, c));
-                    }
-                    if cell.value == Value::Error(CellError::Circ) {
-                        circ.push((si, c));
-                    }
-                } else if cell.py.is_some() {
-                    // A Python cell lays out its kept result, so it is calculated like a formula
-                    // that reads nothing: its spill is blocked and unblocked like a formula's.
-                    self.graph.insert((si, c), Node { areas: Vec::new(), dynamic: false });
+                if self.read_cell(wb, (si, c), cell) {
+                    circ.push((si, c));
                 }
             }
         }
         self.graph.settle();
         self.circular = if wb.calc.iterative { Vec::new() } else { self.loops_among(&circ) };
+    }
+
+    /// Enters a cell in the graph and in the sets kept beside it, as `rebuild` does for every
+    /// cell: `true` for a formula whose cached value is `#CIRC!`. The cell must not be in them
+    /// yet (a cell that isn't a formula removes nothing).
+    fn read_cell(&mut self, wb: &Workbook, (si, c): Key, cell: &gridcraft_model::Cell) -> bool {
+        if cell.value == Value::Error(CellError::Spill) {
+            self.spill_errors.insert((si, c));
+        }
+        if let Some(f) = &cell.formula
+            && let Some((areas, dynamic, hidden_rows)) = f.with_expr(|e| {
+                let (areas, dynamic) = precedents(wb, si, e);
+                (areas, dynamic, reads_hidden_rows(e))
+            })
+        {
+            self.graph.insert((si, c), Node { areas, dynamic });
+            if hidden_rows {
+                self.hidden_row_readers.insert((si, c));
+            }
+            return cell.value == Value::Error(CellError::Circ);
+        } else if cell.py.is_some() {
+            // A Python cell lays out its kept result, so it is calculated like a formula
+            // that reads nothing: its spill is blocked and unblocked like a formula's.
+            self.graph.insert((si, c), Node { areas: Vec::new(), dynamic: false });
+        }
+        false
     }
 
     /// The circular references of a rebuilt workbook (after undo, redo or a rollback, which put
@@ -321,6 +339,85 @@ impl Calc {
         let mut readers: Vec<Key> = self.hidden_row_readers.iter().copied().collect();
         readers.sort_unstable_by_key(|(sheet, c)| (*sheet, c.row, c.col));
         self.cells_changed_and(wb, changed, &readers);
+    }
+
+    /// Recalculates after rows, columns or cells were inserted or deleted on `sheets`, and their
+    /// references rewritten everywhere, when the cells of every other sheet are where they were
+    /// (`changed` lists cells the edit wrote besides).
+    ///
+    /// Everything on those sheets is read into the graph again and recalculated: cells moved, so
+    /// their keys, their spills and whatever a formula takes from its own position changed. On
+    /// the other sheets, the formulas that read those sheets are read again (their references
+    /// were rewritten, or became `#REF!`) and recalculated, with what reads them in turn. A
+    /// formula elsewhere that reads none of this keeps its node and its value: it did not move,
+    /// its text is as it was, and so is every cell it reads. Formulas with references only known
+    /// while evaluating (INDIRECT, OFFSET, names, table references) are recalculated as always.
+    ///
+    /// In manual calculation mode everything is recalculated, as such an edit always did.
+    pub fn sheets_restructured(&mut self, wb: &mut Workbook, sheets: &[usize], changed: &[Key]) {
+        if wb.calc.mode == CalcMode::Manual {
+            self.recalc_all(wb);
+            return;
+        }
+        let on = |sheet: usize| sheets.contains(&sheet);
+        // The graph still describes the workbook before the edit: what stood on the sheets is
+        // forgotten, and what read them from elsewhere is noted.
+        let (mut gone, mut readers) = (Vec::new(), Vec::new());
+        for (k, node) in &self.graph.nodes {
+            if on(k.0) {
+                gone.push(*k);
+            } else if node.areas.iter().any(|a| on(a.sheet)) {
+                readers.push(*k);
+            }
+        }
+        // Taking the graph apart formula by formula costs more than building it, so when most of
+        // it goes anyway, everything is recalculated, as these edits always did.
+        if !self.always_scoped && (gone.len() + readers.len()) * 2 >= self.graph.nodes.len() {
+            self.recalc_all(wb);
+            return;
+        }
+        for k in gone {
+            self.graph.remove(k);
+            self.hidden_row_readers.remove(&k);
+        }
+        for &sheet in sheets {
+            self.spill_errors.clear_sheet(sheet);
+        }
+        // Loops listed on the sheets are listed where their formulas used to be; the run lists
+        // the ones it finds, and every formula of these sheets is in it.
+        self.circular.retain(|k| !on(k.0));
+        let mut seeds: Vec<Key> = changed.to_vec();
+        for &si in sheets {
+            let Some(sheet) = wb.sheet(si) else { continue };
+            for (c, cell) in sheet.cells.iter() {
+                self.read_cell(wb, (si, c), cell);
+                if self.graph.nodes.contains_key(&(si, c)) {
+                    seeds.push((si, c));
+                }
+            }
+        }
+        for &k in &readers {
+            self.graph.remove(k);
+            self.hidden_row_readers.remove(&k);
+            if let Some(cell) = wb.sheet(k.0).and_then(|s| s.cell(k.1)) {
+                self.read_cell(wb, k, cell);
+            }
+        }
+        seeds.extend(readers);
+        self.graph.settle();
+        // Spills are laid out again from the formulas where they are now, as in `recalc_all`.
+        let mut spilled: HashSet<Key> = HashSet::default();
+        for &si in sheets {
+            if wb.sheet(si).is_some_and(|s| !s.spill_ranges.is_empty() || !s.spill.is_empty())
+                && let Some(sh) = wb.sheet_mut(si)
+            {
+                spilled.extend(sh.spill_ranges.keys().map(|a| (si, *a)));
+                sh.spill.clear();
+                sh.spill_ranges.clear();
+            }
+        }
+        let dirty = self.dirty_closure(wb, &seeds, &[]);
+        self.run(wb, dirty, Some(spilled));
     }
 
     /// `cells_changed`, with `also` recalculated as well (formulas, and with them what reads them).

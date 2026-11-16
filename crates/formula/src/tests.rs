@@ -573,6 +573,23 @@ fn column_starting_with_at_round_trips() {
     for name in ["@a", "a@b"] {
         let s = StructRef { table: "T".into(), specifiers: vec![], col_start: Some(name.into()), col_end: None };
         let text = format!("={}", printer::struct_ref(&s));
-        assert_eq!(parse(&text).ok(), Some(Expr::Struct(s)), "printed as {text}");
+        assert_eq!(parse(&text).ok(), Some(Expr::Struct(Box::new(s))), "printed as {text}");
     }
+}
+
+/// Every cell of a filled column holds its own tree, so the size of a node and the room its
+/// lists keep unused are multiplied by the number of formulas in the workbook.
+#[test]
+fn a_parsed_formula_keeps_no_unused_room() -> Result<(), Box<dyn std::error::Error>> {
+    // The two largest kinds of node, a structured reference and a 3-D span, are boxed: a node
+    // was 96 bytes on a 64-bit target when they were held inline.
+    #[cfg(target_pointer_width = "64")]
+    assert!(std::mem::size_of::<Expr>() <= 56, "an expression node is {} bytes", std::mem::size_of::<Expr>());
+    let Expr::Call(_, args) = parse("SUM(A1:A9)")? else { return Err("not a call".into()) };
+    assert_eq!((args.len(), args.capacity()), (1, 1), "a list grown one argument at a time holds room for four");
+    let Expr::Array(rows) = parse("{1,2,3;4,5,6}")? else { return Err("not an array".into()) };
+    assert_eq!((rows.capacity(), rows.iter().map(Vec::capacity).collect::<Vec<_>>()), (2, vec![3, 3]));
+    // Both boxed kinds still parse and print as before.
+    assert_eq!(rt("SUM(Sheet1:Sheet3!A1)+Sales[@Units]"), "SUM(Sheet1:Sheet3!A1)+Sales[@Units]");
+    Ok(())
 }

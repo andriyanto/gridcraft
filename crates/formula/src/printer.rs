@@ -12,7 +12,8 @@ fn sheet_prefix(s: &SheetSel) -> String {
     match s {
         SheetSel::Current => String::new(),
         SheetSel::Named(n) => format!("{}!", quote_sheet(n)),
-        SheetSel::Span(a, b) => {
+        SheetSel::Span(span) => {
+            let (a, b) = &**span;
             let joined = format!("{a}:{b}");
             if needs_quotes(a) || needs_quotes(b) { format!("'{}'!", joined.replace('\'', "''")) } else { format!("{joined}!") }
         }
@@ -66,7 +67,7 @@ fn push_range_a1(s: &mut String, r: &Reference, sep: &str) {
             s.push_str(&quote_sheet(n));
             s.push('!');
         }
-        sheet @ SheetSel::Span(_, _) => s.push_str(&sheet_prefix(sheet)),
+        sheet @ SheetSel::Span(_) => s.push_str(&sheet_prefix(sheet)),
     }
     let dollar = |abs: bool| if abs { "$" } else { "" };
     match &r.kind {

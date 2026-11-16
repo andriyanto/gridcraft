@@ -34,6 +34,48 @@ pub(super) type HashSet<K> = std::collections::HashSet<K, BuildHasherDefault<FxH
 
 pub type Key = (usize, CellRef);
 
+/// The formulas that read one cell. Most cells that are read are read by one formula (a column
+/// of `=A1*2`), and a set of its own for each of them is an allocation several times the size of
+/// the key it holds.
+#[derive(Clone, Debug)]
+enum Readers {
+    One(Key),
+    Many(HashSet<Key>),
+}
+
+impl Readers {
+    fn insert(&mut self, k: Key) {
+        match self {
+            Readers::One(only) if *only == k => {}
+            Readers::One(only) => {
+                let mut set = HashSet::default();
+                set.insert(*only);
+                set.insert(k);
+                *self = Readers::Many(set);
+            }
+            Readers::Many(set) => {
+                set.insert(k);
+            }
+        }
+    }
+    /// Takes `k` out; `true` when no reader is left.
+    fn remove(&mut self, k: &Key) -> bool {
+        match self {
+            Readers::One(only) => only == k,
+            Readers::Many(set) => {
+                set.remove(k);
+                set.is_empty()
+            }
+        }
+    }
+    fn list(&self, out: &mut Vec<Key>) {
+        match self {
+            Readers::One(only) => out.push(*only),
+            Readers::Many(set) => out.extend(set.iter().copied()),
+        }
+    }
+}
+
 #[derive(Clone, Debug, Default)]
 pub(super) struct Node {
     pub(super) areas: Vec<Area>,
@@ -227,7 +269,7 @@ pub(super) struct Taken {
 pub struct Graph {
     pub(super) nodes: HashMap<Key, Node>,
     /// single cell → dependents
-    cell_deps: HashMap<Key, HashSet<Key>>,
+    cell_deps: HashMap<Key, Readers>,
     /// (sheet, col) → row intervals of the ranges (up to `WIDE` columns) that cover the column
     col_deps: HashMap<(usize, u32), Intervals<Key>>,
     /// sheet → row intervals of wider ranges, with their columns: (first, last, dependent)
@@ -273,11 +315,18 @@ impl Graph {
         (cells, cols, wide)
     }
 
-    pub(super) fn insert(&mut self, k: Key, node: Node) {
+    pub(super) fn insert(&mut self, k: Key, mut node: Node) {
         self.remove(k);
+        // A list grown one area at a time holds room for four.
+        node.areas.shrink_to_fit();
         let (cells, cols, wide) = Self::entries(&node.areas);
         for c in cells {
-            self.cell_deps.entry(c).or_default().insert(k);
+            match self.cell_deps.entry(c) {
+                std::collections::hash_map::Entry::Occupied(mut readers) => readers.get_mut().insert(k),
+                std::collections::hash_map::Entry::Vacant(none) => {
+                    none.insert(Readers::One(k));
+                }
+            }
         }
         for (s, c, r0, r1) in cols {
             self.col_deps.entry((s, c)).or_default().insert(r0, r1, k);
@@ -297,11 +346,8 @@ impl Graph {
         let Some(old) = self.nodes.remove(&k) else { return };
         let (cells, cols, wide) = Self::entries(&old.areas);
         for c in cells {
-            if let Some(v) = self.cell_deps.get_mut(&c) {
-                v.remove(&k);
-                if v.is_empty() {
-                    self.cell_deps.remove(&c);
-                }
+            if self.cell_deps.get_mut(&c).is_some_and(|readers| readers.remove(&k)) {
+                self.cell_deps.remove(&c);
             }
         }
         for (s, c, r0, r1) in cols {
@@ -342,8 +388,8 @@ impl Graph {
 
     /// Formulas that read cell `c` of `sheet`.
     pub fn dependents(&self, sheet: usize, c: CellRef, out: &mut Vec<Key>) {
-        if let Some(v) = self.cell_deps.get(&(sheet, c)) {
-            out.extend(v.iter().copied());
+        if let Some(readers) = self.cell_deps.get(&(sheet, c)) {
+            readers.list(out);
         }
         if let Some(v) = self.col_deps.get(&(sheet, c.col)) {
             v.query(c.row, c.row, &mut |k| out.push(*k));
@@ -362,8 +408,8 @@ impl Graph {
     /// then lists those formulas once, instead of once per cell (which squared the work). The
     /// graph must not change while `taken` is in use.
     pub(super) fn dependents_untaken(&self, sheet: usize, c: CellRef, taken: &mut Taken, out: &mut Vec<Key>) {
-        if let Some(v) = self.cell_deps.get(&(sheet, c)) {
-            out.extend(v.iter().copied());
+        if let Some(readers) = self.cell_deps.get(&(sheet, c)) {
+            readers.list(out);
         }
         if let Some(v) = self.col_deps.get(&(sheet, c.col)) {
             v.query_untaken(c.row, c.row, taken.cols.entry((sheet, c.col)).or_default(), &mut |k| {
@@ -387,14 +433,14 @@ impl Graph {
     pub fn dependents_of_range(&self, sheet: usize, range: RangeRef, out: &mut Vec<Key>) {
         if range.count() <= 4096 {
             for c in range.iter() {
-                if let Some(v) = self.cell_deps.get(&(sheet, c)) {
-                    out.extend(v.iter().copied());
+                if let Some(readers) = self.cell_deps.get(&(sheet, c)) {
+                    readers.list(out);
                 }
             }
         } else {
-            for ((s, c), v) in &self.cell_deps {
+            for ((s, c), readers) in &self.cell_deps {
                 if *s == sheet && range.contains(*c) {
-                    out.extend(v.iter().copied());
+                    readers.list(out);
                 }
             }
         }

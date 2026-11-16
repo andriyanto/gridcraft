@@ -35,8 +35,16 @@ pub enum SheetSel {
     /// Unqualified: the formula's own sheet.
     Current,
     Named(String),
-    /// 3-D span `Sheet1:Sheet3`.
-    Span(String, String),
+    /// 3-D span `Sheet1:Sheet3` (first, last). Boxed: every reference of every formula holds a
+    /// `SheetSel`, and two names held inline made each of them 24 bytes larger for a form few use.
+    Span(Box<(String, String)>),
+}
+
+impl SheetSel {
+    /// The 3-D span `first:last`.
+    pub fn span(first: String, last: String) -> SheetSel {
+        SheetSel::Span(Box::new((first, last)))
+    }
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
@@ -199,7 +207,9 @@ pub enum Expr {
     Ref(Reference),
     /// Defined name, table name or LET/LAMBDA parameter.
     Name(String),
-    Struct(StructRef),
+    /// Boxed: a structured reference is larger than any other node, and every node of every
+    /// formula is as large as the largest.
+    Struct(Box<StructRef>),
     Unary(UnOp, Box<Expr>),
     Binary(BinOp, Box<Expr>, Box<Expr>),
     /// Function call; the name is upper-case without `_xlfn.`.

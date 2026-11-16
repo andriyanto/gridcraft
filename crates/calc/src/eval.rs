@@ -261,7 +261,8 @@ impl<'h> Evaluator<'h> {
         match s {
             SheetSel::Current => Ok(vec![self.sheet]),
             SheetSel::Named(n) => wb.sheet_index(n).map(|i| vec![i]).ok_or(CellError::Ref),
-            SheetSel::Span(a, b) => {
+            SheetSel::Span(span) => {
+                let (a, b) = &**span;
                 let (i, j) = (wb.sheet_index(a).ok_or(CellError::Ref)?, wb.sheet_index(b).ok_or(CellError::Ref)?);
                 Ok((i.min(j)..=i.max(j)).collect())
             }

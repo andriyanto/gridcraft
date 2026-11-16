@@ -1049,6 +1049,43 @@ pub(crate) mod tests {
         assert_eq!(offered, 3);
     }
 
+    /// A cell read by one formula holds that formula alone, and a set once a second one reads it.
+    #[test]
+    fn the_readers_of_a_cell_follow_formulas_entered_and_removed() {
+        use super::Node;
+        use crate::eval::Area;
+        let cell = |row: u32, col: u32| CellRef::new(row, col);
+        let reads = |c: CellRef| Node { areas: vec![Area { sheet: 0, range: RangeRef::new(c, c) }], dynamic: false };
+        let mut calc = Calc::new();
+        let readers = |calc: &Calc| {
+            let mut out = Vec::new();
+            calc.graph.dependents(0, cell(0, 0), &mut out);
+            out.sort_unstable_by_key(|(_, c)| (c.row, c.col));
+            out
+        };
+        let (b1, b2, b3) = ((0, cell(0, 1)), (0, cell(1, 1)), (0, cell(2, 1)));
+        calc.graph.insert(b1, reads(cell(0, 0)));
+        assert_eq!(readers(&calc), vec![b1]);
+        // The same formula entered again is still one reader.
+        calc.graph.insert(b1, reads(cell(0, 0)));
+        assert_eq!(readers(&calc), vec![b1]);
+        calc.graph.insert(b2, reads(cell(0, 0)));
+        calc.graph.insert(b3, reads(cell(0, 0)));
+        assert_eq!(readers(&calc), vec![b1, b2, b3]);
+        calc.graph.remove(b1);
+        calc.graph.remove(b3);
+        assert_eq!(readers(&calc), vec![b2]);
+        // A formula that now reads another cell leaves this one.
+        calc.graph.insert(b2, reads(cell(5, 5)));
+        assert_eq!(readers(&calc), Vec::<Key>::new());
+        calc.graph.insert(b3, reads(cell(0, 0)));
+        assert_eq!(readers(&calc), vec![b3]);
+        let mut of_range = Vec::new();
+        calc.graph.dependents_of_range(0, RangeRef::new(cell(0, 0), cell(9, 9)), &mut of_range);
+        of_range.sort_unstable_by_key(|(_, c)| (c.row, c.col));
+        assert_eq!(of_range, vec![b2, b3]);
+    }
+
     #[test]
     fn dirty_closure_matches_a_walk_of_every_cell() {
         // Random formulas over single cells, narrow ranges and wide (over 64 columns) ranges, some

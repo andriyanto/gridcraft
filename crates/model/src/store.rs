@@ -4,10 +4,12 @@
 //! `Arc` of its own. Cloning a store (an undo snapshot) copies only the band pointers; editing a
 //! cell copies its band's row pointers and that one row. A row moved whole (rows inserted or
 //! deleted above it) keeps its `Arc`, so a snapshot from before the move still shares its cells.
+//!
+//! A row is a list of its cells in column order ([`Row`]), as long as the cells it holds.
 
 use std::collections::btree_map::Entry;
 use std::collections::{BTreeMap, HashSet};
-use std::ops::RangeInclusive;
+use std::ops::{Bound, RangeBounds, RangeInclusive};
 use std::sync::Arc;
 
 use gridcraft_core::{CellRef, RangeRef};
@@ -21,8 +23,277 @@ fn has_value(cell: &Cell) -> bool {
     cell.has_content()
 }
 
-/// The cells of one row: col → cell.
-type Row = BTreeMap<u32, Cell>;
+/// The cells of one row, in column order.
+///
+/// A row of up to [`Row::SHORT`] cells is a list, searched by halving. A `BTreeMap` allocates its
+/// first node with room for eleven cells, so a row that held one cell cost as much as a row that
+/// held eleven, and a sheet of a few long columns (the commonest shape of data) took several
+/// times the memory of its cells. The list is as long as its cells: it grows one cell at a time
+/// while it is short and by a quarter after that.
+///
+/// A longer row is the map it always was: a cell entered in the middle of a list moves the cells
+/// after it, which a row of thousands of cells filled from the right, or by a file that lists its
+/// cells out of order, would pay for once per cell.
+///
+/// Saved and read as a map of column to cell either way.
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(from = "BTreeMap<u32, Cell>", into = "BTreeMap<u32, Cell>")]
+enum Row {
+    Short(Vec<(u32, Cell)>),
+    Long(BTreeMap<u32, Cell>),
+}
+
+impl Default for Row {
+    fn default() -> Row {
+        Row::Short(Vec::new())
+    }
+}
+
+/// Two rows are equal when they hold the same cells, whichever way each holds them.
+impl PartialEq for Row {
+    fn eq(&self, other: &Row) -> bool {
+        self.len() == other.len() && self.iter().eq(other.iter())
+    }
+}
+
+impl From<BTreeMap<u32, Cell>> for Row {
+    fn from(map: BTreeMap<u32, Cell>) -> Row {
+        if map.len() > Row::SHORT { Row::Long(map) } else { Row::Short(map.into_iter().collect()) }
+    }
+}
+
+impl From<Row> for BTreeMap<u32, Cell> {
+    fn from(row: Row) -> BTreeMap<u32, Cell> {
+        match row {
+            Row::Short(list) => list.into_iter().collect(),
+            Row::Long(map) => map,
+        }
+    }
+}
+
+/// The cells of a row, or of a span of its columns, in column order.
+enum Cells<'a> {
+    Short(std::slice::Iter<'a, (u32, Cell)>),
+    Long(std::collections::btree_map::Range<'a, u32, Cell>),
+}
+
+impl<'a> Iterator for Cells<'a> {
+    type Item = (&'a u32, &'a Cell);
+    fn next(&mut self) -> Option<Self::Item> {
+        match self {
+            Cells::Short(list) => list.next().map(|(col, cell)| (col, cell)),
+            Cells::Long(map) => map.next(),
+        }
+    }
+}
+
+impl DoubleEndedIterator for Cells<'_> {
+    fn next_back(&mut self) -> Option<Self::Item> {
+        match self {
+            Cells::Short(list) => list.next_back().map(|(col, cell)| (col, cell)),
+            Cells::Long(map) => map.next_back(),
+        }
+    }
+}
+
+/// The cells of a row taken out of it, in column order.
+enum IntoCells {
+    Short(std::vec::IntoIter<(u32, Cell)>),
+    Long(std::collections::btree_map::IntoIter<u32, Cell>),
+}
+
+impl Iterator for IntoCells {
+    type Item = (u32, Cell);
+    fn next(&mut self) -> Option<Self::Item> {
+        match self {
+            IntoCells::Short(list) => list.next(),
+            IntoCells::Long(map) => map.next(),
+        }
+    }
+}
+
+impl IntoIterator for Row {
+    type Item = (u32, Cell);
+    type IntoIter = IntoCells;
+    fn into_iter(self) -> IntoCells {
+        match self {
+            Row::Short(list) => IntoCells::Short(list.into_iter()),
+            Row::Long(map) => IntoCells::Long(map.into_iter()),
+        }
+    }
+}
+
+/// The positions in `list` of the cells whose column is in `cols`.
+fn span(list: &[(u32, Cell)], cols: &impl RangeBounds<u32>) -> std::ops::Range<usize> {
+    let start = match cols.start_bound() {
+        Bound::Included(c) => list.partition_point(|(col, _)| col < c),
+        Bound::Excluded(c) => list.partition_point(|(col, _)| col <= c),
+        Bound::Unbounded => 0,
+    };
+    let end = match cols.end_bound() {
+        Bound::Included(c) => list.partition_point(|(col, _)| col <= c),
+        Bound::Excluded(c) => list.partition_point(|(col, _)| col < c),
+        Bound::Unbounded => list.len(),
+    };
+    start..end.max(start)
+}
+
+impl Row {
+    /// The most cells a row holds as a list: entering a cell moves at most this many.
+    const SHORT: usize = 32;
+    /// Lists shorter than this hold no spare room at all.
+    const EXACT_BELOW: usize = 8;
+
+    /// The room a list of `len` cells may hold.
+    fn room(len: usize) -> usize {
+        if len < Self::EXACT_BELOW { len } else { len.saturating_add(len / 4).min(Self::SHORT) }
+    }
+    /// An empty row that `cells` cells will be entered in, in column order.
+    fn with_capacity(cells: usize) -> Row {
+        if cells > Self::SHORT { Row::Long(BTreeMap::new()) } else { Row::Short(Vec::with_capacity(cells)) }
+    }
+    fn len(&self) -> usize {
+        match self {
+            Row::Short(list) => list.len(),
+            Row::Long(map) => map.len(),
+        }
+    }
+    fn is_empty(&self) -> bool {
+        self.len() == 0
+    }
+    /// About the bytes the row's cells are stored in: a list's allocation, a map's nodes.
+    fn allocated_bytes(&self) -> usize {
+        use std::mem::size_of;
+        match self {
+            Row::Short(list) => list.capacity().saturating_mul(size_of::<(u32, Cell)>()),
+            Row::Long(map) => map.len().saturating_mul(size_of::<u32>() + size_of::<Cell>() + 3 * size_of::<usize>()),
+        }
+    }
+    fn get(&self, col: &u32) -> Option<&Cell> {
+        match self {
+            Row::Short(list) => list.binary_search_by_key(col, |(c, _)| *c).ok().and_then(|i| list.get(i)).map(|(_, cell)| cell),
+            Row::Long(map) => map.get(col),
+        }
+    }
+    fn get_mut(&mut self, col: &u32) -> Option<&mut Cell> {
+        match self {
+            Row::Short(list) => list.binary_search_by_key(col, |(c, _)| *c).ok().and_then(|i| list.get_mut(i)).map(|(_, cell)| cell),
+            Row::Long(map) => map.get_mut(col),
+        }
+    }
+    fn contains_key(&self, col: &u32) -> bool {
+        self.get(col).is_some()
+    }
+    /// Stores `cell` at `col` and returns the cell that was there.
+    fn insert(&mut self, col: u32, cell: Cell) -> Option<Cell> {
+        let list = match self {
+            Row::Short(list) => list,
+            Row::Long(map) => return map.insert(col, cell),
+        };
+        // Past the last cell, as a row filled left to right is: no search.
+        let at = if list.last().is_none_or(|(last, _)| *last < col) { Err(list.len()) } else { list.binary_search_by_key(&col, |(c, _)| *c) };
+        match at {
+            Ok(i) => list.get_mut(i).map(|slot| std::mem::replace(&mut slot.1, cell)),
+            Err(_) if list.len() >= Self::SHORT => {
+                let mut map: BTreeMap<u32, Cell> = std::mem::take(list).into_iter().collect();
+                map.insert(col, cell);
+                *self = Row::Long(map);
+                None
+            }
+            Err(i) => {
+                if list.len() == list.capacity() {
+                    list.reserve_exact(Self::room(list.len() + 1).saturating_sub(list.len()).max(1));
+                }
+                list.insert(i, (col, cell));
+                None
+            }
+        }
+    }
+    fn remove(&mut self, col: &u32) -> Option<Cell> {
+        let cell = match self {
+            Row::Short(list) => {
+                let i = list.binary_search_by_key(col, |(c, _)| *c).ok()?;
+                list.remove(i).1
+            }
+            Row::Long(map) => map.remove(col)?,
+        };
+        self.settle();
+        Some(cell)
+    }
+    /// After cells left: a map with few cells becomes a list again, and a list gives back the
+    /// room it no longer needs. A row goes back to a list at half the length that made it a
+    /// map, so that one cell entered and removed at the limit doesn't convert it each time.
+    fn settle(&mut self) {
+        match self {
+            Row::Long(map) if map.len() <= Self::SHORT / 2 => *self = Row::Short(std::mem::take(map).into_iter().collect()),
+            Row::Long(_) => {}
+            Row::Short(list) => {
+                let room = Self::room(list.len());
+                if list.capacity() > room {
+                    list.shrink_to(room);
+                }
+            }
+        }
+    }
+    fn iter(&self) -> Cells<'_> {
+        self.range(..)
+    }
+    fn keys(&self) -> impl DoubleEndedIterator<Item = &u32> + '_ {
+        self.iter().map(|(col, _)| col)
+    }
+    fn values(&self) -> impl DoubleEndedIterator<Item = &Cell> + '_ {
+        self.iter().map(|(_, cell)| cell)
+    }
+    /// The cells whose column is in `cols`, in column order.
+    fn range(&self, cols: impl RangeBounds<u32>) -> Cells<'_> {
+        match self {
+            Row::Short(list) => Cells::Short(list.get(span(list, &cols)).unwrap_or_default().iter()),
+            Row::Long(map) => {
+                // A map panics on a range that ends before it starts; a list gives none.
+                let backwards = match (cols.start_bound(), cols.end_bound()) {
+                    (Bound::Included(a) | Bound::Excluded(a), Bound::Included(b)) => a > b,
+                    (Bound::Included(a), Bound::Excluded(b)) => a > b,
+                    (Bound::Excluded(a), Bound::Excluded(b)) => a >= b,
+                    _ => false,
+                };
+                if backwards { Cells::Short([].iter()) } else { Cells::Long(map.range(cols)) }
+            }
+        }
+    }
+    /// Takes the cells at `col` and after out of the row.
+    fn split_off(&mut self, col: &u32) -> Row {
+        let mut tail = match self {
+            Row::Short(list) => Row::Short(list.split_off(span(list, &(*col..)).start)),
+            Row::Long(map) => Row::Long(map.split_off(col)),
+        };
+        self.settle();
+        tail.settle();
+        tail
+    }
+    /// Takes the cells whose column is in `cols` out of the row.
+    fn take(&mut self, cols: RangeInclusive<u32>) -> Row {
+        let mut taken = match self {
+            Row::Short(list) => Row::Short(list.drain(span(list, &cols)).collect()),
+            Row::Long(map) => {
+                let mut taken = map.split_off(cols.start());
+                if let Some(next) = cols.end().checked_add(1) {
+                    map.append(&mut taken.split_off(&next));
+                }
+                Row::Long(taken)
+            }
+        };
+        self.settle();
+        taken.settle();
+        taken
+    }
+    fn retain(&mut self, mut keep: impl FnMut(&u32, &mut Cell) -> bool) {
+        match self {
+            Row::Short(list) => list.retain_mut(|(col, cell)| keep(col, cell)),
+            Row::Long(map) => map.retain(keep),
+        }
+        self.settle();
+    }
+}
 
 #[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
 struct Band {
@@ -230,8 +501,9 @@ impl CellStore {
     /// longer shares. This is for bounding Undo history, not for reporting process memory:
     /// BTreeMap nodes and allocator overhead vary by platform. A row `newer` still holds counts
     /// only its pointer, wherever `newer` holds it: rows moved whole by an insert or delete above
-    /// them keep their cells. Shared formulas and values are counted only when the newer row no
-    /// longer holds the same Arc.
+    /// them keep their cells. A row it no longer holds counts its own allocation and that of its
+    /// list of cells, whatever the number of cells. Shared formulas and values are counted only
+    /// when the newer row no longer holds the same Arc.
     pub fn retained_bytes_against(&self, newer: &CellStore) -> usize {
         use std::mem::size_of;
 
@@ -257,10 +529,12 @@ impl CellStore {
                 if moved.contains(&Arc::as_ptr(cols)) {
                     continue;
                 }
+                // The row behind its `Arc` and its list of cells: two allocations, each with
+                // what the allocator keeps beside it (two words). The cells are duplicated with
+                // the row even when their formula/value Arcs are still shared with the next
+                // snapshot.
+                bytes = bytes.saturating_add(size_of::<Row>() + 6 * size_of::<usize>()).saturating_add(cols.allocated_bytes());
                 for (col, cell) in cols.iter() {
-                    // Cells and BTreeMap nodes are duplicated with a cloned band even when
-                    // their formula/value Arcs are still shared with the next snapshot.
-                    bytes = bytes.saturating_add(size_of::<u32>() + size_of::<Cell>() + 3 * size_of::<usize>());
                     let next_cell = next.and_then(|b| b.rows.get(row)).and_then(|r| r.get(col));
                     if let Some(formula) = &cell.formula
                         && !next_cell.and_then(|c| c.formula.as_ref()).is_some_and(|f| Arc::ptr_eq(f, formula))
@@ -379,11 +653,7 @@ impl CellStore {
                     // Nothing right of the block: one split.
                     Arc::new(Arc::make_mut(&mut kept).split_off(&c0))
                 } else {
-                    let mut taken = BTreeMap::new();
-                    for (col, cell) in Arc::make_mut(&mut kept).extract_if(c0..=c1, |_, _| true) {
-                        taken.insert(col, cell);
-                    }
-                    Arc::new(taken)
+                    Arc::new(Arc::make_mut(&mut kept).take(c0..=c1))
                 };
                 if !kept.is_empty() {
                     band.rows.insert(row, kept);
@@ -467,13 +737,14 @@ fn shifted(at: u32, delta: i64, limit: u32) -> Option<u32> {
 
 /// The cells of one row with their columns moved by `delta`; cells that would leave the sheet are
 /// dropped.
-fn shift_keys(cols: BTreeMap<u32, Cell>, delta: i64) -> BTreeMap<u32, Cell> {
-    let mut out = BTreeMap::new();
+fn shift_keys(cols: Row, delta: i64) -> Row {
+    let mut out = Row::with_capacity(cols.len());
     for (col, cell) in cols {
         if let Some(c) = shifted(col, delta, gridcraft_core::MAX_COLS) {
             out.insert(c, cell);
         }
     }
+    out.settle();
     out
 }
 
@@ -759,6 +1030,106 @@ mod tests {
         s.shift_cols(5, 1);
         assert!(Arc::ptr_eq(&s.bands[&0], &snap.bands[&0]));
         assert_eq!(s.get(c(201, 6)).map(|x| x.value.clone()), Some(Value::from("x")));
+    }
+
+    fn number(n: u32) -> Cell {
+        Cell::value(f64::from(n).into())
+    }
+
+    /// Random inserts, removals, splits and cuts on a row and on the map it replaces, across the
+    /// length where a row stops being a list: the two hold the same cells after every step, and
+    /// every way of reading the row gives what the map gives.
+    #[test]
+    fn a_row_holds_what_a_map_of_its_cells_would() {
+        let mut seed = 0x9E37_79B9_7F4A_7C15u64;
+        let mut next = |n: u32| {
+            seed = seed.wrapping_mul(6364136223846793005).wrapping_add(1442695040888963407);
+            ((seed >> 33) % u64::from(n)) as u32
+        };
+        for case in 0..60 {
+            // Columns from a small set, so that cells collide, rows pass the limit and come back.
+            let width = [6, 20, 40, 90][case % 4];
+            let (mut row, mut map) = (Row::default(), BTreeMap::new());
+            for step in 0..400 {
+                let (col, other) = (next(width), next(width));
+                let (c0, c1) = (col.min(other), col.max(other));
+                match next(10) {
+                    0..=5 => assert_eq!(row.insert(col, number(step)), map.insert(col, number(step)), "case {case} step {step}"),
+                    6 | 7 => assert_eq!(row.remove(&col), map.remove(&col), "case {case} step {step}"),
+                    8 => {
+                        let (tail, expected) = (row.split_off(&col), map.split_off(&col));
+                        assert_eq!(BTreeMap::from(tail), expected, "case {case} step {step}: the cells split off");
+                    }
+                    _ => {
+                        let taken = row.take(c0..=c1);
+                        let expected: BTreeMap<u32, Cell> = map.extract_if(c0..=c1, |_, _| true).collect();
+                        assert_eq!(BTreeMap::from(taken), expected, "case {case} step {step}: the cells cut out");
+                    }
+                }
+                assert_eq!(row.len(), map.len(), "case {case} step {step}");
+                assert!(row.iter().eq(map.iter()), "case {case} step {step}");
+                assert!(row.iter().rev().eq(map.iter().rev()), "case {case} step {step}: backwards");
+                assert!(row.range(c0..=c1).eq(map.range(c0..=c1)), "case {case} step {step}: {c0}..={c1}");
+                assert!(row.range(..c0).eq(map.range(..c0)) && row.range(c1..).eq(map.range(c1..)), "case {case} step {step}");
+                assert!(row.range(c1..=c0).eq(map.range(c0..=c1).filter(|_| c0 == c1)), "case {case} step {step}: a span that ends before it starts");
+                assert_eq!((row.get(&col), row.contains_key(&other)), (map.get(&col), map.contains_key(&other)), "case {case} step {step}");
+                assert_eq!(row, Row::from(map.clone()), "case {case} step {step}: equal to the row read back from its map");
+                match &row {
+                    Row::Short(list) => assert!(list.len() <= Row::SHORT && list.capacity() <= Row::room(list.len()).max(list.len())),
+                    Row::Long(map) => assert!(map.len() > Row::SHORT / 2),
+                }
+            }
+            row.retain(|col, _| col % 3 == 0);
+            map.retain(|col, _| col % 3 == 0);
+            assert!(row.iter().eq(map.iter()), "case {case}: after retain");
+        }
+    }
+
+    /// A short row is as long as its cells; a long one is a map, however it was filled.
+    #[test]
+    fn a_row_takes_the_room_of_its_cells() {
+        let cell = std::mem::size_of::<(u32, Cell)>();
+        let mut row = Row::default();
+        for (n, col) in [5, 2, 9].into_iter().enumerate() {
+            row.insert(col, number(col));
+            assert_eq!(row.allocated_bytes(), (n + 1) * cell, "{} cells", n + 1);
+        }
+        row.remove(&2);
+        assert_eq!(row.allocated_bytes(), 2 * cell, "a cell removed gives its room back");
+        // A full row entered from the right: each cell would move every cell entered before it.
+        let mut wide = Row::default();
+        for col in (0..MAX_COLS).rev() {
+            wide.insert(col, number(col));
+        }
+        assert!(matches!(wide, Row::Long(_)) && wide.len() == MAX_COLS as usize);
+        wide.retain(|col, _| *col < 10);
+        assert!(matches!(wide, Row::Short(_)) && wide.keys().copied().eq(0..10), "few cells left: a list again");
+        // One cell a row, the shape of a long column: the store counts what each row takes.
+        let mut column = CellStore::new();
+        for r in 0..1000 {
+            column.set(c(r, 0), number(r));
+        }
+        let per_row = column.retained_bytes_against(&CellStore::new()) / 1000;
+        assert!((cell..200).contains(&per_row), "{per_row} bytes counted for a row of one cell");
+    }
+
+    /// A store is saved as it always was: each row a map of column to cell.
+    #[test]
+    fn rows_are_saved_as_maps_of_column_to_cell() -> Result<(), serde_json::Error> {
+        let mut s = CellStore::new();
+        s.set(c(3, 7), number(1));
+        s.set(c(3, 2), number(2));
+        for col in 0..50 {
+            s.set(c(70, col), number(col));
+        }
+        let json = serde_json::to_value(&s)?;
+        let row = &json["bands"]["0"]["rows"]["3"];
+        assert_eq!(row.as_object().map(|cells| cells.keys().cloned().collect::<Vec<_>>()), Some(vec!["2".to_string(), "7".to_string()]), "{row}");
+        assert_eq!(json["bands"]["1"]["rows"]["70"].as_object().map(serde_json::Map::len), Some(50));
+        let back: CellStore = serde_json::from_value(json)?;
+        assert_eq!(back, s);
+        assert_eq!(back.get(c(70, 49)).map(|x| x.value.clone()), Some(Value::from(49.0)));
+        Ok(())
     }
 
     /// A store of `rows` rows with `cols` numbers in each.

@@ -83,6 +83,17 @@ pub(crate) fn show(app: &mut SheetApp, ctx: &egui::Context) {
 mod tests {
     use super::*;
 
+    /// This copy is developed on its own: a build of it looks for, and downloads, the releases of
+    /// its own repository, never those of the project craft-update lists as GridCraft.
+    #[test]
+    fn updates_come_from_this_repository() {
+        assert_eq!(crate::UPDATE_APP.repo, "andriyanto/gridcraft");
+        assert_ne!(crate::UPDATE_APP.repo, craft_update::suite::GRIDCRAFT.repo);
+        assert_eq!(crate::UPDATE_APP.developer, "andriyanto");
+        // The rest is the suite's description of the app: asset names and install ids.
+        assert_eq!(crate::UPDATE_APP.id, craft_update::suite::GRIDCRAFT.id);
+    }
+
     #[test]
     fn result_window_shows_every_status_but_idle() {
         let shown = [

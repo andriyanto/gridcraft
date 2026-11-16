@@ -2935,3 +2935,45 @@ fn formulas_sharing_a_range_get_what_each_gets_alone() {
     assert_eq!(t.num("O3"), 0.0);
     check(&t, "after the array is gone");
 }
+
+/// A defined name that refers to itself is a circular reference, as a cell that does is. It
+/// was evaluated again and again until the nesting limit answered `#NUM!`.
+#[test]
+fn a_name_that_refers_to_itself_is_a_circular_reference() {
+    let mut t = T::new();
+    let name = |t: &mut T, name: &str, formula: &str| {
+        t.wb.names.push(gridcraft_model::DefinedName {
+            name: name.into(),
+            scope: None,
+            formula: formula.into(),
+            comment: String::new(),
+            hidden: false,
+        });
+    };
+    name(&mut t, "Alfa", "Beta");
+    name(&mut t, "Beta", "Alfa");
+    name(&mut t, "Self", "Self+1");
+    name(&mut t, "Gama", "Alfa+1");
+    name(&mut t, "Twice", "Sheet1!$A$1*2");
+    name(&mut t, "Chain", "Twice+Twice");
+    // A LAMBDA that calls itself by its name: its body runs after the name gave the function.
+    name(&mut t, "Fact", "LAMBDA(n,IF(n<=1,1,n*Fact(n-1)))");
+    t.set("A1", "5");
+    let circ = Value::Error(CellError::Circ);
+    for f in ["=Alfa", "=Beta", "=Self", "=Gama", "=Alfa+Beta", "=IF(TRUE,Self,0)", "=SUM(1,Gama)"] {
+        t.set("B1", f);
+        assert_eq!(t.get("B1"), circ, "{f}");
+    }
+    t.set("B1", "=ISERROR(Alfa)");
+    assert_eq!(t.get("B1"), Value::Bool(true));
+    // A name used twice, and names that read other names, are not loops.
+    t.set("B2", "=Chain+Twice");
+    assert_eq!(t.num("B2"), 30.0);
+    t.set("B3", "=Fact(5)");
+    assert_eq!(t.num("B3"), 120.0);
+    // The loop gone, the name calculates.
+    t.wb.names.retain(|n| n.name != "Beta");
+    name(&mut t, "Beta", "Sheet1!$A$1");
+    t.set("B1", "=Gama");
+    assert_eq!(t.num("B1"), 6.0);
+}

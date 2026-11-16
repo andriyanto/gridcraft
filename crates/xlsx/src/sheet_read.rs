@@ -714,6 +714,9 @@ fn read_formula(cx: &mut Ctx<'_>, st: &mut RowState, f: &El, pos: CellRef, dynam
     // so saving never turns the formula into a legacy one.
     let mut unwrapped = false;
     let fm = read_formula_text(cx, st, f, pos, dynamic, &mut unwrapped)?;
+    if fm.expr.is_none() {
+        cx.unread_formulas.note(pos, &fm.text);
+    }
     let dynamic = dynamic || unwrapped;
     Some(Formula { dynamic, ..fm })
 }

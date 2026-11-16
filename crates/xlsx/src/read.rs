@@ -39,11 +39,46 @@ pub struct Ctx<'a> {
     /// Bytes charged so far for shared formulas expanded into dependent cells (see
     /// [`crate::sheet_read::MAX_SHARED_FORMULA_BYTES`]).
     pub shared_formula_bytes: u64,
+    /// The formulas of the worksheet being read that could not be parsed, collected per sheet.
+    pub unread_formulas: UnreadFormulas,
     /// Whether GridCraft calculates a function, when the caller says: cell formulas wrapped by
     /// Google Sheets' export are then read as the formula inside (see [`crate::read_xlsx_with`]).
     pub known_function: Option<&'a dyn Fn(&str) -> bool>,
     /// The code of the workbook's Python cells, from its Python part.
     pub python: crate::python_part::ScriptsIn,
+}
+
+/// The formulas of one worksheet that the parser refused: longer than Excel allows, nested too
+/// deeply, or not a formula at all. Such a cell keeps its formula text and shows the value the
+/// file saved for it, which nothing recalculates: the number on screen may not be what the
+/// formula gives, and it stays as it is when the cells it names change. Excel writes no such
+/// formula; a file with one comes from another program, or was made to mislead. One warning a
+/// sheet says so.
+#[derive(Default)]
+pub struct UnreadFormulas {
+    count: usize,
+    /// The first of them, and why it could not be read.
+    first: Option<(gridcraft_core::CellRef, String)>,
+}
+
+impl UnreadFormulas {
+    /// Notes the formula at `at`, whose `text` does not parse.
+    pub fn note(&mut self, at: gridcraft_core::CellRef, text: &str) {
+        self.count += 1;
+        if self.first.is_none() {
+            let why = gridcraft_formula::parse(text).err().map(|e| e.msg).unwrap_or_default();
+            self.first = Some((at, why));
+        }
+    }
+    fn warning(self, sheet: &str) -> Option<String> {
+        let (at, why) = self.first?;
+        let which = match self.count {
+            1 => format!("the formula in {at} could not be read ({why})"),
+            n => format!("{n} formulas could not be read (the first, in {at}: {why})"),
+        };
+        let cells = if self.count == 1 { "its cell shows the value" } else { "their cells show the values" };
+        Some(format!("sheet \"{sheet}\": {which}; {cells} saved in the file, which is not recalculated"))
+    }
 }
 
 impl Ctx<'_> {
@@ -263,6 +298,7 @@ pub fn read_xlsx<'a>(bytes: &'a [u8], opts: crate::ReadOptions<'a>) -> Result<(W
         cf_ext_ids: vec![],
         legacy_formulas: vec![],
         shared_formula_bytes: 0,
+        unread_formulas: UnreadFormulas::default(),
         known_function,
         python: Default::default(),
     };
@@ -338,15 +374,20 @@ pub fn read_xlsx<'a>(bytes: &'a [u8], opts: crate::ReadOptions<'a>) -> Result<(W
         }
         let name = names.unique(&name, i);
         cx.legacy_formulas.clear();
+        cx.unread_formulas = UnreadFormulas::default();
         let (mut sheet, read_controls) = match crate::sheet_read::read_sheet(&mut cx, &rel.target, &name) {
             Ok(s) => s,
             Err(IoError::TooLarge(m)) => return Err(IoError::TooLarge(m)),
             Err(e) => {
                 cx.warn(format!("sheet \"{name}\" could not be read: {e}"));
                 cx.legacy_formulas.clear();
+                cx.unread_formulas = UnreadFormulas::default();
                 (Sheet::new(name.clone()), Default::default())
             }
         };
+        if let Some(warning) = std::mem::take(&mut cx.unread_formulas).warning(&name) {
+            cx.warn(warning);
+        }
         legacy_formulas.push((wb.sheets.len(), std::mem::take(&mut cx.legacy_formulas)));
         match crate::pivot::read_pivots(&mut cx, &mut pivot_caches, &rel.target, &name) {
             Ok(p) => sheet.pivots = p,

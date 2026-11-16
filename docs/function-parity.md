@@ -1,6 +1,6 @@
 # Function parity: worksheet functions and formulas
 
-> **Last reviewed:** 2026-10-31 · **Last updated:** 2026-11-15 · **Change:** minor (whole columns read as an array end at their own filled cells; earlier: GROUPBY total depth 2 or more adds subtotals; earlier: Python cells are edited in the formula bar; earlier: the Python errors `#PYTHON!`, `#BUSY!`, `#TIMEOUT!` and `#BLOCKED!`, and a Python in cells row; earlier: YEARFRAC basis 0 February-end rule, MOD quotient limit, PERCENTRANK significance; earlier: edge cases matched to Excel: base conversions, BITLSHIFT/BITRSHIFT, UNICHAR noncharacters, UPPER/LOWER/PROPER casing, FIXED/DOLLAR output, F/T/GAMMA/WEIBULL/BETA distributions, BINOM trial cap, HARMEAN; earlier: ECMA.CEILING listed with USDOLLAR as not on Microsoft's list; earlier: IMSQRT reproduces the stray real part Excel gives for negative reals) · **Target:** Microsoft Excel (Microsoft 365), Excel for Mac 16.113.4
+> **Last reviewed:** 2026-10-31 · **Last updated:** 2026-11-17 · **Change:** trivial (a name that refers to itself is `#CIRC!`; earlier: whole columns read as an array end at their own filled cells; earlier: GROUPBY total depth 2 or more adds subtotals; earlier: Python cells are edited in the formula bar; earlier: the Python errors `#PYTHON!`, `#BUSY!`, `#TIMEOUT!` and `#BLOCKED!`, and a Python in cells row; earlier: YEARFRAC basis 0 February-end rule, MOD quotient limit, PERCENTRANK significance; earlier: edge cases matched to Excel: base conversions, BITLSHIFT/BITRSHIFT, UNICHAR noncharacters, UPPER/LOWER/PROPER casing, FIXED/DOLLAR output, F/T/GAMMA/WEIBULL/BETA distributions, BINOM trial cap, HARMEAN; earlier: ECMA.CEILING listed with USDOLLAR as not on Microsoft's list; earlier: IMSQRT reproduces the stray real part Excel gives for negative reals) · **Target:** Microsoft Excel (Microsoft 365), Excel for Mac 16.113.4
 
 Excel's worksheet functions, category by category, against GridCraft's function library. Part of
 [target-app-parity.md](target-app-parity.md); gaps feed [gaps.md](gaps.md).
@@ -79,7 +79,7 @@ This improves series preparation; it does not change the model-fitting or season
 | A1 and R1C1 references, absolute/relative/mixed, F4 cycling | done |
 | 3-D references (`Sheet1:Sheet3!A1`) | done; deleting a span's end sheet keeps the rest (#140) |
 | Structured references (`Table1[Col]`, `[#Totals]`, `@`; the unbracketed `[[#This Row],Col]` some writers emit) | done |
-| Defined names (workbook and sheet scope), Create from Selection | done |
+| Defined names (workbook and sheet scope), Create from Selection | done; a name that refers to itself, directly or through other names, is `#CIRC!` like a cell that does (a LAMBDA name that calls itself is not a loop) |
 | Dynamic arrays, spill, `#SPILL!`, spill operator `A1#` | done; stale spills after a structural edit or a cleared blocker fixed (#133, #139; PRs #148, #157) |
 | Recalculation after clearing large sparse ranges | every stored cell changed by Clear is reported to recalculation, without a million-coordinate cutoff; removed formula spills are cleared, and removing empty merges still unblocks spills (#1032) |
 | Whole columns and rows read as an array (`=A:A`, `=A:A*B:B`, `TRANSPOSE(1:2)`) | cut down to the last filled row and column of the whole rows and columns the formula reads (the same cut for each, so they pair up), not to the sheet's used range: a value typed elsewhere on the sheet no longer changes the size of the array. Cells that only carry a format are not counted. A formula with references worked out as it runs (INDIRECT, OFFSET, names, table references) still stops at the used range. One whole row (16,384 cells) keeps its full size |
@@ -137,6 +137,7 @@ workbooks; results checked in as data, not Excel files) and fixing what it finds
 
 | Date | Change | Summary |
 |---|---|---|
+| 2026-11-17 | trivial | A defined name that refers to itself (`Total = Total+1`, or `A = B` with `B = A`) is `#CIRC!`, the error a circular cell gets; it was `#NUM!`, from the nesting limit, after being evaluated 400 levels deep |
 | 2026-11-15 | minor | A whole column or row read as an array ends at the last filled cell of the whole columns and rows the formula reads, instead of at the sheet's used range: the array (and its spill) kept its old size until a full recalculation when a value was typed elsewhere on the sheet. A reference to more than one cell at a value parameter (`EOMONTH(Z:Z,0)`) is `#VALUE!` by its size, also when the column is empty |
 | 2026-11-03 | minor | GROUPBY: a total depth of 2 or more adds a subtotal line for each group of the leading key columns (after the group, or before it for a negative depth) and labels the last line Grand Total; a depth past the key columns, or above 1 with `field_relationship` 1, is `#VALUE!`, as in Excel (#1456 item 1) |
 | 2026-11-01 | minor | Python in cells row: Python mode in the formula bar |

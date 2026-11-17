@@ -314,6 +314,8 @@ impl SheetApp {
         // mode, and letting go of the copied cells and of the Format Painter (Esc, or Enter
         // after a paste).
         let (mode, copied, painting) = (self.session.mode, self.session.clipboard.is_some(), self.session.format_painter.is_some());
+        // The window the person is in now, when it is not the one the command was asked in.
+        let moved_to = self.session.active_window().filter(|w| Some(*w) != busy.window);
         self.session = back.session;
         if mode != busy.mode {
             self.session.mode = mode;
@@ -373,6 +375,15 @@ impl SheetApp {
         while !self.is_busy() {
             let Some((id, params)) = self.background_state.queued.pop_front() else { break };
             self.run_or_alert(&id, params);
+        }
+        // All of that happened in the command's window: what it asked for (a dialog, its error,
+        // its draft opened again) is that window's, and so is what waited behind it. The session
+        // came back with that window active. The person may have gone on to another window
+        // meanwhile, and that one is the active window again: left as it came back, the command's
+        // window was brought forward over theirs when the command was over, and what they then
+        // asked for in their window ran in the command's workbook.
+        if let Some(window) = moved_to.filter(|w| self.session.window(*w).is_some()) {
+            self.enter_window(window);
         }
     }
 

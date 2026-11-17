@@ -49,6 +49,29 @@ pub struct Dx12Adapter {
     pub device_type: DeviceType,
     /// Whether the adapter offers the limits eframe will ask for when it creates the device.
     pub meets_limits: bool,
+    /// Whether it is a Qualcomm Adreno GPU (Windows on Arm laptops): see [`adreno_only`].
+    pub adreno: bool,
+}
+
+/// Whether `vendor` (a PCI or ACPI vendor id, as DXGI reports it) or `name` says the adapter is a
+/// Qualcomm Adreno GPU. Windows on Arm reports Adreno with Qualcomm's ACPI id (`QCOM`); its PCI id
+/// is listed too.
+pub fn is_adreno(vendor: u32, name: &str) -> bool {
+    const QUALCOMM: [u32; 2] = [0x4D4F_4351, 0x5143];
+    let name = name.to_ascii_lowercase();
+    QUALCOMM.contains(&vendor) || name.contains("adreno") || name.contains("qualcomm")
+}
+
+/// Whether every GPU DirectX 12 can use is an Adreno (and there is one). On such a machine a
+/// second workbook window is not shown through DirectX 12: Windows lists it, but choosing it
+/// leaves the first window's workbook on the screen. That was seen with WordCraft, which draws
+/// its windows the same way with the same libraries, on a Snapdragon laptop; the same build
+/// through OpenGL (`WGPU_BACKEND=gl`) showed every window. So [`configure`] uses OpenGL there
+/// when the machine has it, and DirectX 12 as before when it has not. `WGPU_BACKEND` still
+/// decides when set.
+pub fn adreno_only(dx12_adapters: &[Dx12Adapter]) -> bool {
+    let mut usable = dx12_adapters.iter().filter(|a| a.device_type != DeviceType::Cpu && a.meets_limits).peekable();
+    usable.peek().is_some() && usable.all(|a| a.adreno)
 }
 
 /// The backends to initialize on Windows.
@@ -130,7 +153,16 @@ pub fn configure(options: &mut NativeOptions, backend_override: Option<Backends>
         }
         None => {
             let adapters = probe_dx12(options);
-            let backends = choose_backends(None, &adapters);
+            // Adreno: OpenGL shows every workbook window, DirectX 12 only the first. OpenGL is
+            // probed on these machines alone (creating it can crash an AMD driver, see
+            // `configure_backends`). If it does not start after all, the second start takes
+            // DirectX 12 ([`fallback_backends`]).
+            let backends = if adreno_only(&adapters) && has_opengl() {
+                log::info!("graphics: Adreno GPU, using OpenGL");
+                Backends::GL
+            } else {
+                choose_backends(None, &adapters)
+            };
             log::info!("graphics: {} DirectX 12 adapter(s) {adapters:?}, backends {backends:?}", adapters.len());
             backends
         }
@@ -159,9 +191,25 @@ fn probe_dx12(options: &NativeOptions) -> Vec<Dx12Adapter> {
             let required = (create.device_descriptor)(adapter).required_limits;
             let meets_limits = required.check_limits(&adapter.limits());
             log::info!("graphics: DirectX 12 adapter {:?} ({:?}, driver {:?}), limits ok: {meets_limits}", info.name, info.device_type, info.driver);
-            Dx12Adapter { device_type: info.device_type, meets_limits }
+            Dx12Adapter { device_type: info.device_type, meets_limits, adreno: is_adreno(info.vendor, &info.name) }
         })
         .collect()
+}
+
+/// Whether an OpenGL instance finds an adapter to draw with (not a software one).
+#[cfg(target_os = "windows")]
+fn has_opengl() -> bool {
+    use eframe::wgpu::{Instance, InstanceDescriptor};
+    if !Instance::enabled_backend_features().contains(Backends::GL) {
+        return false;
+    }
+    let instance = Instance::new(InstanceDescriptor { backends: Backends::GL, ..InstanceDescriptor::new_without_display_handle() });
+    let adapters = pollster::block_on(instance.enumerate_adapters(Backends::GL));
+    for adapter in &adapters {
+        let info = adapter.get_info();
+        log::info!("graphics: OpenGL adapter {:?} ({:?}, driver {:?})", info.name, info.device_type, info.driver);
+    }
+    adapters.iter().any(|a| a.get_info().device_type != DeviceType::Cpu)
 }
 
 #[cfg(test)]
@@ -227,7 +275,41 @@ mod tests {
     }
 
     const fn adapter(device_type: DeviceType, meets_limits: bool) -> Dx12Adapter {
-        Dx12Adapter { device_type, meets_limits }
+        Dx12Adapter { device_type, meets_limits, adreno: false }
+    }
+
+    /// Windows on Arm: a second window was listed by Windows but never shown through DirectX 12
+    /// on an Adreno GPU, and shown through OpenGL. Only machines whose every usable GPU is an
+    /// Adreno take OpenGL (and only when they have it, which `configure` asks).
+    #[test]
+    fn a_machine_with_only_an_adreno_gpu_prefers_opengl() {
+        // As DXGI reports the Snapdragon X's GPU, and by PCI id or name alone.
+        assert!(is_adreno(0x4D4F_4351, "Snapdragon(R) X Elite - X1E80100 - Qualcomm(R) Adreno(TM) GPU"));
+        assert!(is_adreno(0x5143, "GPU"));
+        assert!(is_adreno(0, "Qualcomm(R) Adreno(TM) 690 GPU"));
+        for (vendor, name) in [
+            (0x8086, "Intel(R) UHD Graphics"),
+            (0x10DE, "NVIDIA GeForce RTX 4060"),
+            (0x1002, "AMD Radeon(TM) Graphics"),
+            (0x1414, "Microsoft Basic Render Driver"),
+        ] {
+            assert!(!is_adreno(vendor, name), "{name}");
+        }
+        let adreno = Dx12Adapter { device_type: DeviceType::IntegratedGpu, meets_limits: true, adreno: true };
+        let warp = adapter(DeviceType::Cpu, true);
+        assert!(adreno_only(&[adreno]));
+        assert!(adreno_only(&[adreno, warp]), "the software adapter beside it doesn't count");
+        // Another usable GPU keeps DirectX 12, and so does a machine without an Adreno.
+        assert!(!adreno_only(&[adreno, adapter(DeviceType::DiscreteGpu, true)]));
+        assert!(!adreno_only(&[adapter(DeviceType::IntegratedGpu, true)]));
+        assert!(!adreno_only(&[warp]));
+        assert!(!adreno_only(&[]));
+        // An Adreno that can't run the app is no reason to choose for it.
+        assert!(!adreno_only(&[Dx12Adapter { meets_limits: false, ..adreno }]));
+        // What DirectX 12 alone would have chosen is unchanged, and so is the second start when
+        // OpenGL does not come up.
+        assert_eq!(choose_backends(None, &[adreno]), Backends::DX12);
+        assert_eq!(fallback_backends(None, Backends::GL), Some(Backends::DX12));
     }
 
     #[test]

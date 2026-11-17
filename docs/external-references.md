@@ -1,6 +1,6 @@
 # References to other workbooks
 
-> **Last reviewed:** 2026-11-18 · **Last updated:** 2026-11-18 · **Change:** minor (step A1 built; earlier: the design) · **Target:** Microsoft Excel (Microsoft 365)
+> **Last reviewed:** 2026-11-18 · **Last updated:** 2026-11-18 · **Change:** minor (step A2 built; earlier: step A1; the design) · **Target:** Microsoft Excel (Microsoft 365)
 
 A formula that reads a cell of another workbook: `=[Budget.xlsx]Sheet1!B4`. This page is the
 design, written before the work; the table of steps says which are built. Statements about Excel come from the
@@ -92,9 +92,15 @@ differs. Also when S is opened, and when a formula that reads S is entered.
   longer what the file has), as an update of links does in Excel.
 - A chain (C reads B reads A) settles in order; a loop across workbooks stops after a fixed
   number of rounds and leaves the values of the last one.
-- Matching is by the path when both have one, else by name. Two open workbooks with the same
-  file name in different folders are told apart by path; a formula typed by name alone takes the
-  one in the reader's own folder first.
+- Matching is by name for now (the name the source's window shows: its file name, or its title
+  while it has no file). By path when both have one comes with the file's targets (A3): two open
+  workbooks with the same file name in different folders are not told apart yet.
+- What a workbook's formulas read is collected once per version of the workbook, and only for
+  a workbook that may read another: a session in which none does pays nothing. A workbook that
+  does is looked through whole after each of its own changes; that is the part to make
+  incremental if it shows.
+- A link's number as a file writes it (`[1]`) is never matched to an open workbook: its link is
+  the file's to bring.
 - Saving S under another name renames it in the formulas of the open workbooks that read it.
 
 ### 5. The file: links become part of the model
@@ -138,7 +144,7 @@ Each is one pull request with its tests, and leaves files from Excel reading and
 | Step | Content | Seen by a person |
 |---|---|---|
 | **A1** (done) | Formula text: lexer, parser, printer, `SheetSel::External`; edits to this workbook leave such a reference alone, a copied formula shifts it. Model: `Workbook::links`. Calculation from the copy. | A typed `=[Book2]Sheet1!A1` is accepted and stays blank: nothing fills the copy yet. A file's formulas into other workbooks now parse, and keep their saved values |
-| **A2** | Session: copies kept current between open workbooks; rename on Save As | Typed references between open workbooks are live |
+| **A2** (done) | Session: copies kept current between open workbooks after every command (`engine/src/book_links.rs`); a source saved under another name is renamed in the formulas that read it | Typed references between open workbooks are live. A source that is not open is `#REF!` until it is |
 | **A3** | File: links read into and written from the model, relative targets, one numbering with the kept links | They survive save and open, also to and from Excel |
 | **A4** | Interface: pointing across windows | Click in the other window, as in Excel |
 | **B** | Question on open, the saved values with a source closed, Edit Links (Change Source, Break Link) | |
@@ -161,4 +167,5 @@ smallest and comes last because it makes the feature reachable.
 | Date | Change | Summary |
 |---|---|---|
 | 2026-11-18 | minor | The design, before any of it is built |
+| 2026-11-18 | minor | A2: the session keeps the values current between open workbooks, follows a source saved under another name, and gives `#REF!` for a source that is not open |
 | 2026-11-18 | minor | A1: such references parse, print and calculate from the values the workbook keeps; a formula into a workbook there is no link to keeps its value |

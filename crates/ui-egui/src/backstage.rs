@@ -752,7 +752,10 @@ pub fn export_as(app: &mut SheetApp, fmt: &str) -> bool {
         // The picker may suggest a workbook extension; the export writes the chosen format.
         let path = std::path::Path::new(&path).with_extension(fmt).to_string_lossy().into_owned();
         return match app.run(id, json!({"path": path})) {
-            Ok(_) => true,
+            Ok(_) => {
+                app.exported_to(&path);
+                true
+            }
             Err(e) => {
                 app.message = Some(("GridCraft".into(), crate::clean_error(&e)));
                 false

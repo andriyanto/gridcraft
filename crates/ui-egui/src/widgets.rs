@@ -614,9 +614,16 @@ pub fn message_box(app: &mut SheetApp, ctx: &egui::Context) {
 }
 
 /// Shows a translated toast for 2.5 seconds and clears it after the deadline.
+/// How long a toast stays, in milliseconds: two and a half seconds, and longer for one that
+/// takes longer to read (where an exported file went, with its folder), up to seven.
+pub fn toast_time_ms(text: &str) -> f64 {
+    let beyond = text.chars().count().saturating_sub(40).min(90);
+    2500.0 + 50.0 * beyond as f64
+}
+
 pub fn toast(app: &mut SheetApp, ctx: &egui::Context) {
     let Some((msg, at)) = app.toast.clone() else { return };
-    if crate::now_ms() - at > 2500.0 {
+    if crate::now_ms() - at > toast_time_ms(&msg) {
         app.toast = None;
         return;
     }

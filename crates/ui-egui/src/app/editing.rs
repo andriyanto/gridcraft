@@ -107,6 +107,16 @@ impl SheetApp {
         true
     }
 
+    /// A formula is being typed and the sheet shown is another sheet of its workbook: its cells
+    /// are being pointed at. That sheet's own selection is not drawn meanwhile (its outline, its
+    /// fill and its headers): clicks there pick cells for the formula and leave it where it was,
+    /// so it read as a pointer that would not follow.
+    pub(crate) fn pointing_on_another_sheet(&self) -> bool {
+        self.editor
+            .as_ref()
+            .is_some_and(|ed| ed.is_formula() && self.session.active().is_some_and(|d| d.uid == ed.doc && d.wb.active_sheet() != ed.sheet))
+    }
+
     /// The cell draft belongs to a window or workbook other than the one showing.
     pub(super) fn draft_elsewhere(&self) -> bool {
         self.editor.as_ref().is_some_and(|ed| {

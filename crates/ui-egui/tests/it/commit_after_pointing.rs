@@ -52,3 +52,184 @@ fn ctrl_enter_after_pointing_on_another_sheet_fills_the_origin_selection() {
     }
     assert!(wb.sheet(1).unwrap().cell(CellRef::parse("A1").unwrap()).is_none(), "the pointed-at sheet's selection is untouched");
 }
+
+mod keys {
+    //! The keys of a formula that points at another sheet. The in-cell editor is drawn on the
+    //! formula's own sheet only, and it was the one that took the draft's keys: with another
+    //! sheet shown, Enter, Esc and typing did nothing until the formula bar was clicked.
+
+    use egui::{Event, Key, Modifiers, PointerButton, Pos2};
+    use gridcraft_engine::Session;
+    use gridcraft_engine::core::CellRef;
+    use gridcraft_ui_egui::grid::Geo;
+    use serde_json::json;
+
+    type H = crate::common::Harness;
+
+    fn cell_pos(h: &H, cell: &str) -> Pos2 {
+        let app = h.state();
+        let sheet = app.session.active().unwrap().wb.active().unwrap();
+        let geo = Geo::new(sheet, app.grid.rect.unwrap(), app.view().scroll);
+        geo.cell_rect(sheet, CellRef::parse(cell).unwrap()).center()
+    }
+
+    fn click_at(h: &mut H, pos: Pos2) {
+        h.input_mut().events.push(Event::PointerMoved(pos));
+        for pressed in [true, false] {
+            h.input_mut().events.push(Event::PointerButton { pos, button: PointerButton::Primary, pressed, modifiers: Modifiers::NONE });
+        }
+        h.run_steps(3);
+    }
+
+    /// Where the tab of sheet `name` is painted.
+    fn tab_pos(h: &H, name: &str) -> Pos2 {
+        h.output()
+            .shapes
+            .iter()
+            .find_map(|s| match &s.shape {
+                egui::Shape::Text(t) if t.galley.job.text == name => Some(t.visual_bounding_rect().center()),
+                _ => None,
+            })
+            .unwrap_or_else(|| panic!("the {name} tab is painted"))
+    }
+
+    fn key(h: &mut H, key: Key) {
+        for pressed in [true, false] {
+            h.input_mut().events.push(Event::Key { key, physical_key: None, pressed, repeat: false, modifiers: Modifiers::NONE });
+        }
+        h.run_steps(3);
+    }
+
+    fn text(h: &mut H, text: &str) {
+        h.input_mut().events.push(Event::Text(text.into()));
+        h.run_steps(3);
+    }
+
+    fn draft(h: &H) -> Option<String> {
+        h.state().editor.as_ref().map(|ed| ed.text.clone())
+    }
+
+    fn formula(h: &H, sheet: usize, cell: &str) -> Option<String> {
+        let wb = &h.state().session.active().unwrap().wb;
+        wb.sheet(sheet).unwrap().cell(CellRef::parse(cell).unwrap()).and_then(|c| c.formula.as_ref().map(|f| f.text.clone()))
+    }
+
+    /// `=` typed in Sheet1!B2 with the keyboard, then the Sheet2 tab and Sheet2!D6 clicked.
+    fn pointing_at_sheet2() -> H {
+        let mut session = Session::new();
+        session.new_workbook();
+        session.execute("home.insertSheet", json!({})).unwrap();
+        session.execute("cell.set", json!({"cell": "D6", "input": "40"})).unwrap();
+        session.execute("cell.set", json!({"cell": "F9", "input": "2"})).unwrap();
+        session.execute("sheet.activate", json!({"sheet": 0})).unwrap();
+        let mut h = crate::support::harness(session, 4);
+        let b2 = cell_pos(&h, "B2");
+        click_at(&mut h, b2);
+        text(&mut h, "=");
+        assert_eq!(draft(&h).as_deref(), Some("="));
+        let tab = tab_pos(&h, "Sheet2");
+        click_at(&mut h, tab);
+        assert_eq!(h.state().session.active().unwrap().wb.active_sheet(), 1, "the other sheet is shown");
+        let d6 = cell_pos(&h, "D6");
+        click_at(&mut h, d6);
+        assert_eq!(draft(&h).as_deref(), Some("=Sheet2!D6"));
+        h
+    }
+
+    #[test]
+    fn enter_commits_a_formula_that_points_at_another_sheet() {
+        let mut h = pointing_at_sheet2();
+        key(&mut h, Key::Enter);
+        assert_eq!(draft(&h), None, "Enter entered the formula");
+        assert_eq!(h.state().session.active().unwrap().wb.active_sheet(), 0, "its own sheet is shown again");
+        assert_eq!(formula(&h, 0, "B2").as_deref(), Some("Sheet2!D6"));
+        assert_eq!(h.state().session.active().unwrap().selection.active.a1(), "B3", "and Enter moved down from it");
+    }
+
+    #[test]
+    fn typing_goes_on_in_a_formula_that_points_at_another_sheet() {
+        let mut h = pointing_at_sheet2();
+        text(&mut h, "+");
+        assert_eq!(draft(&h).as_deref(), Some("=Sheet2!D6+"));
+        let f9 = cell_pos(&h, "F9");
+        click_at(&mut h, f9);
+        assert_eq!(draft(&h).as_deref(), Some("=Sheet2!D6+Sheet2!F9"));
+        key(&mut h, Key::Enter);
+        assert_eq!(draft(&h), None);
+        assert_eq!(formula(&h, 0, "B2").as_deref(), Some("Sheet2!D6+Sheet2!F9"));
+    }
+
+    #[test]
+    fn arrows_still_point_and_the_cell_shows_the_value() {
+        let mut h = pointing_at_sheet2();
+        // The edit began by typing in a cell, so an arrow moves what is pointed at (it does not
+        // move the caret, as it would had the formula bar been clicked).
+        key(&mut h, Key::ArrowDown);
+        assert_eq!(draft(&h).as_deref(), Some("=Sheet2!D7"));
+        key(&mut h, Key::ArrowUp);
+        key(&mut h, Key::Enter);
+        let wb = &h.state().session.active().unwrap().wb;
+        assert_eq!(wb.sheet(0).unwrap().value(CellRef::parse("B2").unwrap()).as_f64(), Some(40.0));
+    }
+
+    #[test]
+    fn back_on_its_own_sheet_the_draft_still_has_its_keys() {
+        let mut h = pointing_at_sheet2();
+        text(&mut h, "+");
+        let tab = tab_pos(&h, "Sheet1");
+        click_at(&mut h, tab);
+        assert_eq!(h.state().session.active().unwrap().wb.active_sheet(), 0);
+        assert_eq!(draft(&h).as_deref(), Some("=Sheet2!D6+"), "the draft is still open");
+        text(&mut h, "1");
+        assert_eq!(draft(&h).as_deref(), Some("=Sheet2!D6+1"));
+        key(&mut h, Key::Enter);
+        assert_eq!(draft(&h), None);
+        assert_eq!(formula(&h, 0, "B2").as_deref(), Some("Sheet2!D6+1"));
+    }
+
+    /// How many sides of the selection's outline were painted over the cells last frame.
+    fn outline_sides(h: &H) -> usize {
+        let cells = h.state().grid.cells_rect.unwrap();
+        let green = gridcraft_ui_egui::theme::Tokens::get(&h.ctx).sel_border;
+        h.output()
+            .shapes
+            .iter()
+            .filter(|s| match &s.shape {
+                egui::Shape::Rect(r) => r.fill == green && cells.expand(2.0).contains_rect(r.rect) && r.rect.width().min(r.rect.height()) <= 3.0,
+                _ => false,
+            })
+            .count()
+    }
+
+    /// The other sheet's own selection is not drawn while the formula points at its cells: a
+    /// click there picks a cell for the formula and leaves that selection where it was, so its
+    /// green box read as a pointer that did not follow.
+    #[test]
+    fn the_other_sheet_s_selection_is_not_drawn_while_pointing_at_it() {
+        let mut h = pointing_at_sheet2();
+        h.run_steps(2);
+        assert_eq!(outline_sides(&h), 0, "no green box on the sheet pointed at");
+        let d = h.state().session.active().unwrap();
+        assert_eq!((d.wb.active_sheet(), d.selection.a1()), (1, "A1".to_string()), "its selection is where it was");
+        // The formula's own sheet shows the cell being edited, as always.
+        let tab = tab_pos(&h, "Sheet1");
+        click_at(&mut h, tab);
+        assert!(outline_sides(&h) > 0, "the cell being edited is outlined on its own sheet");
+        key(&mut h, Key::Enter);
+        assert!(outline_sides(&h) > 0);
+        // And once the formula is entered the other sheet shows its selection again.
+        let tab = tab_pos(&h, "Sheet2");
+        click_at(&mut h, tab);
+        assert_eq!(h.state().session.active().unwrap().wb.active_sheet(), 1);
+        assert!(outline_sides(&h) > 0, "the selection is drawn again");
+    }
+
+    #[test]
+    fn esc_cancels_a_formula_that_points_at_another_sheet() {
+        let mut h = pointing_at_sheet2();
+        key(&mut h, Key::Escape);
+        assert_eq!(draft(&h), None, "Esc dropped the draft");
+        assert_eq!(formula(&h, 0, "B2"), None);
+        assert_eq!(formula(&h, 1, "B2"), None);
+    }
+}

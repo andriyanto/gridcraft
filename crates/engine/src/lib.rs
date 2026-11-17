@@ -65,6 +65,10 @@ pub enum EngineError {
     Approve(String),
     #[error("internal error in `{0}` (the workbook was kept as it was): {1}")]
     Internal(String, String),
+    /// The command was stopped while it calculated ([`Session::interrupt`]); everything is as it
+    /// was before the command.
+    #[error("cancelled (the workbook was kept as it was)")]
+    Cancelled,
 }
 
 pub type Result<T> = std::result::Result<T, EngineError>;
@@ -224,6 +228,11 @@ pub struct DocState {
     /// The references `edit.goTo` with `record: true` went to in this document, newest first,
     /// without names, each area written with its sheet (`Sheet1!B14:C22,Sheet1!F19:G30`).
     pub go_to_recent: Vec<String>,
+}
+
+/// What a caught panic said.
+fn panic_message(panic: &(dyn std::any::Any + Send)) -> String {
+    panic.downcast_ref::<&str>().map(ToString::to_string).or_else(|| panic.downcast_ref::<String>().cloned()).unwrap_or_else(|| "panic".into())
 }
 
 static NEXT_UID: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(1);
@@ -531,11 +540,24 @@ pub struct Session {
     /// Measures cell text for AutoFit Column Width. Without it (CLI, MCP) AutoFit uses
     /// [`cmd::format::approx_text_width`].
     pub text_width: Option<TextWidth>,
+    /// Stops the running command's recalculation when asked to (see [`Session::interrupt`]).
+    interrupt: Arc<gridcraft_calc::Interrupt>,
 }
 
 impl Session {
     pub fn new() -> Session {
         Session::default()
+    }
+    /// The handle that stops the command this session is running, from another thread:
+    /// `request` on it makes the recalculation stop at the next formula, and the command then
+    /// fails with [`EngineError::Cancelled`], leaving the workbook, its selection and its undo
+    /// history as they were before it.
+    ///
+    /// Only calculating can be stopped, between two formulas. A command that is slow at something
+    /// else (reading a file, moving a million cells) runs to its end, and so does one long
+    /// formula. A request made while no command runs is forgotten when the next one starts.
+    pub fn interrupt(&self) -> Arc<gridcraft_calc::Interrupt> {
+        self.interrupt.clone()
     }
     pub fn documents(&self) -> &[DocState] {
         &self.docs
@@ -667,8 +689,78 @@ impl Session {
     /// Runs a command by id. Undoable commands record a history step when the workbook changed,
     /// unless an undo group is open on the document (the group then makes the step).
     /// Panics inside commands are caught and reported; the workbook is restored.
+    /// Puts the workbook, its selection and its history back as they were before a command that
+    /// panicked or was stopped (`cancelled`), and drops the undo groups the command opened.
+    fn put_back(
+        &mut self,
+        before: &Option<(u64, Arc<Workbook>, Selection)>,
+        history_before: Option<(Vec<HistoryEntry>, Vec<HistoryEntry>)>,
+        groups_before: Vec<(u64, String, Arc<Workbook>, Selection)>,
+        first_group: u64,
+        paused_before: u32,
+        cancelled: bool,
+    ) {
+        // Restore the workbook and its history as they were, and drop the undo groups the
+        // command opened.
+        self.groups.retain(|g| g.id < first_group);
+        let group_open = before.as_ref().is_some_and(|(uid, ..)| self.groups.iter().any(|g| g.doc == *uid));
+        if let Some((uid, wb, sel)) = before
+            && let Some(d) = self.docs.iter_mut().find(|d| d.uid == *uid)
+        {
+            // A stopped recalculation put the graph back for the workbook it left in place
+            // (`cmd::stopped`): when that is still the one from before the command, there
+            // is nothing to build.
+            let graph_stands = cancelled && Arc::ptr_eq(&d.wb, wb);
+            d.wb = wb.clone();
+            d.selection = sel.clone();
+            if let Some((undo, redo)) = history_before {
+                d.undo = undo;
+                d.redo = redo;
+            }
+            // A group open before the command and ended or rolled back inside it stays
+            // ended (its token went with the command), and keeps a step from its start to
+            // the restored workbook, so Undo still returns to the state before the group.
+            if !group_open
+                && let Some((_, label, wb, selection)) = groups_before.into_iter().min_by_key(|g| g.0)
+                && !Arc::ptr_eq(&wb, &d.wb)
+            {
+                push_entry(&mut d.undo, label, wb, &d.wb, selection);
+                d.redo.clear();
+            }
+            if !graph_stands {
+                d.calc.rebuild(&d.wb);
+            }
+        }
+        if self.journal_paused != paused_before {
+            self.journal_paused = paused_before;
+            for d in self.docs.iter_mut() {
+                d.touched = None;
+            }
+        }
+        if self.depth == 0 {
+            // Only the `macro.debug` call itself can lose the run's place: a command nested
+            // in a step that panics is an error of that step, which the run handles.
+            macros::debug::recover(self);
+            self.trim_history();
+            self.group_step = None;
+        }
+    }
+
+    /// Before a top-level command: a request to stop is for the command that was running when
+    /// it was made, so the ones made before are forgotten, and every open workbook's
+    /// recalculation listens for the next.
+    fn listen_for_stop(&mut self) {
+        self.interrupt.reset();
+        for d in self.docs.iter_mut().filter(|d| d.calc.interrupt.is_none()) {
+            d.calc.interrupt = Some(self.interrupt.clone());
+        }
+    }
+
     pub fn execute(&mut self, id: &str, params: Json) -> Result<Json> {
         let spec = find_command(id).ok_or_else(|| EngineError::UnknownCommand(id.to_string()))?;
+        if self.depth == 0 {
+            self.listen_for_stop();
+        }
         if let Err(why) = (spec.enabled)(self) {
             return Err(EngineError::Disabled(id.to_string(), why));
         }
@@ -727,53 +819,19 @@ impl Session {
         if marked.is_some() {
             self.marks.pop();
         }
+        // A recalculation that was asked to stop, anywhere in the command, stops the command: a
+        // nested command's failure is the outer one's to pass on or not, so the outermost one
+        // decides, whatever it returned.
+        let cancelled = self.depth == 0 && self.interrupt.was_hit();
         let result = match result {
-            Ok(r) => r,
-            Err(p) => {
-                let msg = p
-                    .downcast_ref::<&str>()
-                    .map(ToString::to_string)
-                    .or_else(|| p.downcast_ref::<String>().cloned())
-                    .unwrap_or_else(|| "panic".into());
-                // Restore the workbook and its history as they were, and drop the undo groups the
-                // command opened.
-                self.groups.retain(|g| g.id < first_group);
-                let group_open = before.as_ref().is_some_and(|(uid, ..)| self.groups.iter().any(|g| g.doc == *uid));
-                if let Some((uid, wb, sel)) = &before
-                    && let Some(d) = self.docs.iter_mut().find(|d| d.uid == *uid)
-                {
-                    d.wb = wb.clone();
-                    d.selection = sel.clone();
-                    if let Some((undo, redo)) = history_before {
-                        d.undo = undo;
-                        d.redo = redo;
-                    }
-                    // A group open before the command and ended or rolled back inside it stays
-                    // ended (its token went with the command), and keeps a step from its start to
-                    // the restored workbook, so Undo still returns to the state before the group.
-                    if !group_open
-                        && let Some((_, label, wb, selection)) = groups_before.into_iter().min_by_key(|g| g.0)
-                        && !Arc::ptr_eq(&wb, &d.wb)
-                    {
-                        push_entry(&mut d.undo, label, wb, &d.wb, selection);
-                        d.redo.clear();
-                    }
-                    d.calc.rebuild(&d.wb);
-                }
-                if self.journal_paused != paused_before {
-                    self.journal_paused = paused_before;
-                    for d in self.docs.iter_mut() {
-                        d.touched = None;
-                    }
-                }
-                if self.depth == 0 {
-                    // Only the `macro.debug` call itself can lose the run's place: a command nested
-                    // in a step that panics is an error of that step, which the run handles.
-                    macros::debug::recover(self);
-                    self.trim_history();
-                    self.group_step = None;
-                }
-                return Err(EngineError::Internal(id.to_string(), msg));
+            Ok(r) if !cancelled => r,
+            stopped => {
+                let error = match stopped {
+                    Ok(_) => EngineError::Cancelled,
+                    Err(p) => EngineError::Internal(id.to_string(), panic_message(p.as_ref())),
+                };
+                self.put_back(&before, history_before, groups_before, first_group, paused_before, cancelled);
+                return Err(error);
             }
         };
         // A command that fails leaves none of its own undo groups open (a `?` between

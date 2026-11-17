@@ -98,6 +98,12 @@ pub(super) struct PassHost<'a> {
     own_areas: Vec<(Key, RangeRef)>,
     /// The formulas being evaluated, innermost last, for `trim_end`.
     evaluating: Vec<Evaluating>,
+    /// What can ask the pass to stop.
+    pub(super) interrupt: Option<&'a super::Interrupt>,
+    /// The pass was asked to stop: no formula is started any more, and its results are not kept.
+    pub(super) interrupted: bool,
+    /// Formulas started so far (see `ASK_EVERY`).
+    started: u32,
     /// Where the filled cells of a block end (`content_end`), for the blocks asked about in the pass.
     content_ends: HashMap<(usize, RangeRef), Option<CellRef>>,
     /// The kept results of the Python cells in the pass: a Python cell isn't evaluated, its
@@ -105,6 +111,9 @@ pub(super) struct PassHost<'a> {
     /// `pending` until it is laid out, so a formula that reads it first gets its new value.
     python: HashMap<Key, Value>,
 }
+
+/// How many formulas a pass starts between two looks at whether it was asked to stop.
+const ASK_EVERY: u32 = 32;
 
 /// A formula being evaluated.
 struct Evaluating {
@@ -158,6 +167,9 @@ impl<'a> PassHost<'a> {
             memo: gridcraft_functions::Memo::new(),
             own_areas: Vec::new(),
             evaluating: Vec::new(),
+            interrupt: None,
+            interrupted: false,
+            started: 0,
             content_ends: HashMap::default(),
             python: HashMap::default(),
         }
@@ -383,6 +395,15 @@ impl PassHost<'_> {
         let Some(expr) = self.exprs.get(&k) else {
             return self.wb.sheet(k.0).map(|s| s.value(k.1)).unwrap_or_default();
         };
+        // Asked to stop: this formula and the ones after it are not started. The formulas being
+        // evaluated above it finish with blanks, which nobody reads: the pass keeps nothing.
+        // The request is looked at once in `ASK_EVERY` formulas: looked at before each one, it
+        // cost a few percent of a pass of short formulas.
+        self.started = self.started.wrapping_add(1);
+        if self.interrupted || (self.started.is_multiple_of(ASK_EVERY) && self.interrupt.is_some_and(super::Interrupt::is_requested)) {
+            self.interrupted = true;
+            return Value::Empty;
+        }
         if self.suspend.is_some() {
             self.unsettled += 1;
             // Unwinding to `calculate`: the value is thrown away. A formula read at the limit is
@@ -614,6 +635,9 @@ impl PassHost<'_> {
             }
             for k in &again {
                 self.calculate(*k);
+            }
+            if self.interrupted {
+                break;
             }
             passes += 1;
         }

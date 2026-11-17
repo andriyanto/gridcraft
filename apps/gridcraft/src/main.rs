@@ -400,7 +400,7 @@ fn main() -> eframe::Result<()> {
                 };
                 SheetApp::setup_context_for_language(&cc.egui_ctx, app.ui.dark, app.ui.language);
                 if let Some(port) = control_port {
-                    match control_server::start(port, control_token.clone(), cc.egui_ctx.clone()) {
+                    match control_server::start(port, control_token.clone(), cc.egui_ctx.clone(), app.session.interrupt()) {
                         Ok(rx) => app.control_rx = Some(rx),
                         Err(e) => log::error!("control channel on port {port}: {e}"),
                     }

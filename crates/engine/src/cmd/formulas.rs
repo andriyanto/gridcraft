@@ -926,6 +926,7 @@ fn calc_now(s: &mut Session, _: &Json) -> Result<Json> {
     let d = s.doc_mut()?;
     let mut wb = (*d.wb).clone();
     d.calc.recalc_all(&mut wb);
+    crate::cmd::stopped(d, None)?;
     d.wb = std::sync::Arc::new(wb);
     Ok(json!({"cells": d.calc.last_recalc_cells}))
 }

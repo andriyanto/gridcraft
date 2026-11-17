@@ -712,3 +712,81 @@ fn a_workbook_opened_after_a_maximized_window_opens_on_the_screen() {
     assert!(at.x >= 0.0 && at.y >= 0.0, "not above or left of the screen: {at:?}");
     assert!(at.x < monitor.x - 200.0 && at.y < monitor.y - 200.0, "its title bar and a good part of it are on the screen: {at:?}");
 }
+
+#[test]
+fn a_window_that_starts_where_another_does_moves_on_to_a_free_place() {
+    use craft_window::Rect;
+    use gridcraft_ui_egui::doc_windows::free_place;
+    let monitor = Some(egui::vec2(1920.0, 1200.0));
+    let at = |x: f32, y: f32| Rect::new(x, y, 1440.0, 900.0);
+    // Nothing under it: it stays.
+    assert_eq!(free_place(at(56.0, 56.0), &[at(0.0, 0.0), at(28.0, 28.0)], monitor), None);
+    assert_eq!(free_place(at(56.0, 56.0), &[], monitor), None);
+    // Exactly over another: one step on. Over a run of them: past the run.
+    assert_eq!(free_place(at(56.0, 56.0), &[at(28.0, 28.0), at(56.0, 56.0)], monitor), Some(at(84.0, 84.0)));
+    assert_eq!(free_place(at(56.0, 56.0), &[at(56.0, 56.0), at(84.0, 84.0), at(112.0, 112.0)], monitor), Some(at(140.0, 140.0)));
+    // A few points off still hides the title bar under it.
+    assert_eq!(free_place(at(56.0, 56.0), &[at(60.0, 51.0)], monitor), Some(at(84.0, 84.0)));
+    // At the screen's edge the step starts over at the top or the left, as a new window's does,
+    // and stays on the monitor the window is on (here the second one, to the right).
+    let low = free_place(at(400.0, 290.0), &[at(400.0, 290.0)], monitor).unwrap();
+    assert_eq!((low.x, low.y), (428.0, 0.0), "no room below: back to the top");
+    let second = free_place(at(1920.0 + 100.0, 50.0), &[at(1920.0 + 100.0, 50.0)], monitor).unwrap();
+    assert_eq!((second.x, second.y), (2048.0, 78.0));
+    // Every step taken, or numbers that aren't: it stays where it is.
+    assert_eq!(free_place(Rect::new(f32::NAN, 0.0, 1440.0, 900.0), &[at(0.0, 0.0)], monitor), None);
+    // Without a monitor's size the steps just go on.
+    assert_eq!(free_place(at(56.0, 56.0), &[at(56.0, 56.0)], None), Some(at(84.0, 84.0)));
+}
+
+/// Book1's window, then Book2's opened from it, then Book1's used again and a third workbook
+/// opened: its window is placed a step from Book1's, which is where Book2's is. It covered
+/// Book2's window exactly; it now moves a step further.
+#[test]
+fn a_new_window_does_not_open_exactly_over_another() {
+    let mut desk = Desk::new(true);
+    let size = egui::vec2(1440.0, 900.0);
+    let rect = |x: f32, y: f32| Some(egui::Rect::from_min_size(egui::pos2(x, y), size));
+    INFOS.with(|i| {
+        let mut i = i.borrow_mut();
+        let root = i.entry(ViewportId::ROOT).or_default();
+        root.focused = Some(true);
+        root.monitor_size = Some(egui::vec2(1920.0, 1200.0));
+        root.outer_rect = rect(28.0, 28.0);
+        root.inner_rect = rect(28.0, 28.0);
+    });
+    desk.frames(2);
+    desk.app.run("file.new", json!({})).unwrap();
+    desk.frames(2);
+    let (w1, w2) = (desk.window_of(0), desk.window_of(1));
+    let v2 = desk.viewport(w2);
+    let placed = |vp: ViewportId| PLACED.with(|p| p.borrow().get(&vp).copied()).flatten();
+    assert_eq!(placed(v2), Some(egui::pos2(56.0, 56.0)));
+    // The system puts Book2's window there, in front; then Book1's window is used again.
+    let focus = |book2: bool| {
+        INFOS.with(|i| {
+            let mut i = i.borrow_mut();
+            i.entry(v2).or_default().outer_rect = rect(56.0, 56.0);
+            i.entry(v2).or_default().focused = Some(book2);
+            i.entry(ViewportId::ROOT).or_default().focused = Some(!book2);
+        });
+    };
+    focus(true);
+    let mut sent = desk.frames(2);
+    focus(false);
+    sent.extend(desk.frames(2));
+    assert!(!sent.iter().any(|(_, c)| matches!(c, ViewportCommand::OuterPosition(_))), "a window over nothing is left alone: {sent:?}");
+    assert_eq!(desk.app.session.active_window(), Some(w1));
+
+    desk.app.run("file.new", json!({})).unwrap();
+    desk.frames(2);
+    let v3 = desk.viewport(desk.window_of(2));
+    assert_eq!(placed(v3), Some(egui::pos2(56.0, 56.0)), "a step from Book1's window: where Book2's is");
+    INFOS.with(|i| i.borrow_mut().entry(v3).or_default().outer_rect = rect(56.0, 56.0));
+    let sent = desk.frames(1);
+    assert!(sent_to(&sent, v3, &ViewportCommand::OuterPosition(egui::pos2(84.0, 84.0))), "moved a step on: {sent:?}");
+    // Once: after that the window is where the person or the system has it.
+    INFOS.with(|i| i.borrow_mut().entry(v3).or_default().outer_rect = rect(56.0, 56.0));
+    let sent = desk.frames(3);
+    assert!(!sent.iter().any(|(_, c)| matches!(c, ViewportCommand::OuterPosition(_))), "{sent:?}");
+}

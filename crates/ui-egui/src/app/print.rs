@@ -28,13 +28,21 @@ impl SheetApp {
         let path = std::path::Path::new(&path).with_extension("pdf").to_string_lossy().into_owned();
         match &mut params {
             Json::Object(map) => {
-                map.insert("path".into(), Json::String(path));
+                map.insert("path".into(), Json::String(path.clone()));
             }
             other => *other = json!({"path": path}),
         }
-        if let Err(e) = self.run("file.exportPdf", params) {
-            self.alert(e);
+        match self.run("file.exportPdf", params) {
+            Ok(_) => self.exported_to(&path),
+            Err(e) => self.alert(e),
         }
+    }
+
+    /// Says where an exported file went. An export leaves the workbook as it is, with its own
+    /// file and title, so without this nothing on the screen told that a file had been written,
+    /// or where.
+    pub(crate) fn exported_to(&mut self, path: &str) {
+        self.toast = Some((exported_message(path), now_ms()));
     }
 
     /// Builds the selected sheets' print-ready PDF and hands it to the desktop worker or the
@@ -85,5 +93,15 @@ impl SheetApp {
         } else {
             self.alert(text);
         }
+    }
+}
+
+/// "Exported Book1.pdf to /home/me/Documents": the file's name, then its folder.
+pub(crate) fn exported_message(path: &str) -> String {
+    let path = std::path::Path::new(path);
+    let name = path.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_else(|| path.to_string_lossy().into_owned());
+    match path.parent().map(|p| p.to_string_lossy()).filter(|p| !p.is_empty()) {
+        Some(folder) => format!("Exported {name} to {folder}"),
+        None => format!("Exported {name}"),
     }
 }

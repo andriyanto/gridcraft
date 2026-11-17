@@ -273,6 +273,42 @@ fn save_as_offers_pdf_and_leaves_the_workbook_file_alone() {
     let _ = std::fs::remove_dir_all(&dir);
 }
 
+/// An export leaves the workbook as it is, with its own file and title: nothing on the screen
+/// told that a file had been written, or where. The window now says so, back on the sheet.
+#[test]
+fn an_export_says_where_the_file_went() {
+    let dir = std::env::temp_dir().join(format!("gridcraft-export-notice-{}", std::process::id()));
+    std::fs::create_dir_all(&dir).unwrap();
+    let target = dir.clone();
+    let mut h =
+        harness(Services { pick_save: Some(Box::new(move |_| Some(target.join("Report").to_string_lossy().into_owned()))), ..Default::default() });
+    h.state_mut().run("cell.set", serde_json::json!({"cell": "A1", "input": "42"})).unwrap();
+    choose(&mut h, "Export");
+    click(&mut h, "CSV (Comma delimited)");
+    assert!(std::fs::read(dir.join("Report.csv")).is_ok(), "the file was written");
+    assert!(h.state().backstage.is_none(), "back on the sheet");
+    let said = h.state().toast.as_ref().map(|(text, _)| text.clone()).unwrap_or_default();
+    assert_eq!(said, format!("Exported Report.csv to {}", dir.display()));
+    h.run_steps(2);
+    assert!(h.query_by_label(&said).is_some(), "and it is on the screen");
+    // A picker closed without a file says nothing.
+    let mut h = harness(Services { pick_save: Some(Box::new(|_| None)), ..Default::default() });
+    choose(&mut h, "Export");
+    click(&mut h, "CSV (Comma delimited)");
+    assert!(h.state().toast.is_none());
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+/// A notice that takes longer to read stays longer: a path does not fit two and a half seconds.
+#[test]
+fn a_longer_toast_stays_longer() {
+    use gridcraft_ui_egui::widgets::toast_time_ms;
+    assert_eq!(toast_time_ms("Cancelled"), 2500.0);
+    assert_eq!(toast_time_ms(&"x".repeat(40)), 2500.0);
+    assert_eq!(toast_time_ms(&"x".repeat(80)), 4500.0);
+    assert_eq!(toast_time_ms(&"x".repeat(5000)), 7000.0, "but not for ever");
+}
+
 /// The window's close button (or Alt+F4, or the OS quitting the app): steps until the request
 /// has been handled and returns the viewport commands the app answered with.
 fn request_window_close(h: &mut egui_kittest::Harness<'static, SheetApp>) -> Vec<egui::ViewportCommand> {

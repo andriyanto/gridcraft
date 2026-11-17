@@ -34,6 +34,8 @@ pub struct DocWindows {
     quit_with_last_window: bool,
     /// The root viewport is hidden because no window is open.
     root_hidden: bool,
+    /// The windows whose first place has been looked at ([`DocWindows::uncover`]).
+    placed: std::collections::HashSet<WindowId>,
 }
 
 impl DocWindows {
@@ -41,7 +43,14 @@ impl DocWindows {
     pub fn new(app: &mut SheetApp, base: egui::ViewportBuilder, quit_with_last_window: bool) -> DocWindows {
         app.native_windows = true;
         // The root window keeps the desktop's frame, so every window does.
-        DocWindows { list: WindowList::new(), viewports: Viewports::new(Frame::Desktop), base, quit_with_last_window, root_hidden: false }
+        DocWindows {
+            list: WindowList::new(),
+            viewports: Viewports::new(Frame::Desktop),
+            base,
+            quit_with_last_window,
+            root_hidden: false,
+            placed: Default::default(),
+        }
     }
 
     /// The platform default for the last window closing: macOS keeps running, others quit.
@@ -231,7 +240,35 @@ impl DocWindows {
             }
             app.enter_window(target);
         }
+        self.uncover(&ctx);
         self.sync(app, &ctx);
+    }
+
+    /// Moves a window that has just opened exactly over another one. A new window goes one step
+    /// down and right of the window used last, and another may already be there (the one opened
+    /// from that same window before): the new window then covered it, title bar and all, and the
+    /// workbook under it looked gone. It moves on, a step at a time, to a place where no window
+    /// starts. Each window is looked at once, when its place is first known; where the person
+    /// puts windows afterwards is theirs.
+    fn uncover(&mut self, ctx: &egui::Context) {
+        let list = &self.list;
+        self.placed.retain(|id| list.contains(*id));
+        let fresh: Vec<WindowId> = list.ids().filter(|id| !self.placed.contains(id) && list.outer_rect(*id).is_some()).collect();
+        let monitor = ctx.input(|i| i.viewport().monitor_size).filter(|m| m.x > 0.0 && m.y > 0.0);
+        for id in fresh {
+            self.placed.insert(id);
+            // The root's window is where the system or the last run put it.
+            if self.viewports.root() == Some(id) {
+                continue;
+            }
+            let Some(rect) = self.list.outer_rect(id) else { continue };
+            let others: Vec<Rect> = self.list.ids().filter(|other| *other != id).filter_map(|other| self.list.outer_rect(other)).collect();
+            if let Some(to) = free_place(rect, &others, monitor) {
+                ctx.send_viewport_cmd_to(self.viewports.viewport_id(id), egui::ViewportCommand::OuterPosition(egui::pos2(to.x, to.y)));
+                // Known at once, for the next window looked at in this same frame.
+                self.list.set_outer_rect(id, Some(to));
+            }
+        }
     }
 
     /// A window's close button. Returns the window to bring forward when the close needs an
@@ -251,6 +288,34 @@ impl DocWindows {
         app.run_or_alert("window.close", json!({"window": window}));
         app.session.active_window()
     }
+}
+
+/// How close two windows' top-left corners are for one to count as covering the other: nearer
+/// than a title bar's height, the one behind can't be reached.
+const COVERED_WITHIN: f32 = 12.0;
+
+/// Where a window at `rect` (outer, in points) goes when it starts where one of `others` does:
+/// on by cascade steps to the first place no window starts at, within the monitor the window is
+/// on (taken from `monitor`, its size, as the tile holding the window's centre; without it the
+/// steps just go on). `None` when the window covers nothing, or every step is taken.
+pub fn free_place(rect: Rect, others: &[Rect], monitor: Option<egui::Vec2>) -> Option<Rect> {
+    let covers = |r: &Rect| others.iter().any(|o| (o.x - r.x).abs() < COVERED_WITHIN && (o.y - r.y).abs() < COVERED_WITHIN);
+    if ![rect.x, rect.y, rect.width, rect.height].iter().all(|v| v.is_finite()) || !covers(&rect) {
+        return None;
+    }
+    let tile = |centre: f32, len: f32| (centre / len).floor() * len;
+    let bounds = match monitor {
+        Some(m) => Rect::new(tile(rect.x + rect.width / 2.0, m.x), tile(rect.y + rect.height / 2.0, m.y), m.x, m.y),
+        None => Rect::new(-1.0e7, -1.0e7, 2.0e7, 2.0e7),
+    };
+    let mut at = rect;
+    for _ in 0..=others.len() {
+        at = cascade(at, [rect.width, rect.height], bounds, CASCADE_STEP);
+        if !covers(&at) {
+            return Some(at);
+        }
+    }
+    None
 }
 
 /// The windows that get a native window: every window not hidden (View › Hide), or the active one

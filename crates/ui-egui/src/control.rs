@@ -133,7 +133,7 @@ fn direct(app: &mut SheetApp, id: &str, p: &Json, via_app: bool) -> Result<Json,
         return run_in(app, target, id, params);
     }
     let guard = app.session.enter_target(target).map_err(|e| e.to_string())?;
-    let r = app.session.run(id, params);
+    let r = app.engine(id, params);
     app.session.leave_target(guard);
     r
 }

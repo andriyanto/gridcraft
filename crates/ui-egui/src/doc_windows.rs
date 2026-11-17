@@ -192,8 +192,11 @@ impl DocWindows {
                 let dropped: Vec<String> = ui
                     .ctx()
                     .input(|i| i.raw.dropped_files.iter().filter_map(|f| f.path().to_str().map(str::to_string)).filter(|p| !p.is_empty()).collect());
-                for path in dropped {
-                    app.open_path(&path);
+                // (Not while a command runs in the background, as for the main window.)
+                if !app.is_busy() {
+                    for path in dropped {
+                        app.open_path(&path);
+                    }
                 }
                 app.ui(ui);
                 if app.session.active_window() != Some(*w) {
@@ -212,6 +215,10 @@ impl DocWindows {
             }
         }
         let target = requested.or_else(|| self.list.active().and_then(|id| self.list.get(id).copied()));
+        // While a command runs in the background the session here stands in for the one it runs
+        // in: the window that came forward becomes the active one when the command is over (this
+        // runs every frame), and a draft left behind stays open in its window.
+        let target = target.filter(|_| !app.is_busy());
         if let Some(target) = target.filter(|w| app.session.window(*w).is_some()) {
             if requested.is_none()
                 && let Some(previous) = focused.filter(|p| *p != target && app.session.window(*p).is_some())

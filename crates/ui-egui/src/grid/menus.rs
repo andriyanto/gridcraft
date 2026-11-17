@@ -16,8 +16,8 @@ pub(super) fn filter_menu(app: &mut SheetApp, ui: &mut egui::Ui, geo: &Geo, was_
     if sh.autofilter.is_none()
         && let Some(r) = table_range
     {
-        let _ = app.session.run("data.filter", json!({"range": r.a1()}));
-        let _ = app.session.run("data.filter", json!({"range": r.a1()}));
+        let _ = app.engine("data.filter", json!({"range": r.a1()}));
+        let _ = app.engine("data.filter", json!({"range": r.a1()}));
         if let Some(sh2) = app.session.active().and_then(|d| d.wb.active()).map(|s| s.autofilter.is_some())
             && !sh2
         {
@@ -370,7 +370,7 @@ pub(super) fn fill_menu(app: &mut SheetApp, ui: &mut egui::Ui, was_open: bool) {
                 if ui.add(egui::Button::new(lang.tr(label)).frame(false).min_size(vec2(180.0, 20.0))).clicked() {
                     close = true;
                     if mode == "ui:series" {
-                        let _ = app.session.run("selection.set", json!({"range": target.union(&src).a1(), "active": src.start.a1()}));
+                        let _ = app.engine("selection.set", json!({"range": target.union(&src).a1(), "active": src.start.a1()}));
                         let direction = if target.width() != src.width() { "rows" } else { "columns" };
                         app.open_dialog("series", json!({"direction": direction}));
                     } else if let Err(e) = app.run("edit.autoFill", json!({"source": src.a1(), "target": target.a1(), "mode": mode})) {

@@ -16,7 +16,7 @@ pub(super) fn print(app: &mut SheetApp, ui: &mut Ui, bs: &mut Backstage, out: &m
     }
     let key = (uid, revision, bs.print_all, bs.fit_to_page);
     if bs.preview.as_ref().is_none_or(|(k, _)| *k != key) {
-        let preview = app.session.run("file.printPreview", params.clone()).unwrap_or(Json::Null);
+        let preview = app.engine("file.printPreview", params.clone()).unwrap_or(Json::Null);
         bs.preview = Some((key, preview));
     }
     let pages: Vec<Json> = bs.preview.as_ref().and_then(|(_, p)| p.get("pageList")).and_then(Json::as_array).cloned().unwrap_or_default();

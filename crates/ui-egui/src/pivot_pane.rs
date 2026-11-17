@@ -24,7 +24,7 @@ pub fn show(app: &mut SheetApp, ui: &mut Ui) {
     let lang = i18n::current(ui.ctx());
     let Some(key) = app.session.active().map(|d| (d.uid, d.revision, name.clone())) else { return };
     if app.grid.pivot_fields.as_ref().is_none_or(|(k, _)| *k != key) {
-        let info = match app.session.run("pivot.fields", json!({"pivot": name})) {
+        let info = match app.engine("pivot.fields", json!({"pivot": name})) {
             Ok(v) => v,
             Err(_) => return,
         };

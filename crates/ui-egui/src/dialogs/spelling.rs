@@ -31,13 +31,13 @@ pub(super) fn spelling(app: &mut SheetApp, ui: &mut egui::Ui, d: &mut Dialog, op
         ui.label(egui::RichText::new("(No suggestions)").italics());
     }
     d.values.insert("pick".into(), json!(pick.clone()));
-    let _ = app.session.run("selection.set", json!({"cell": cell}));
+    let _ = app.engine("selection.set", json!({"cell": cell}));
     ui.horizontal(|ui| {
         if ui.button("Ignore Once").clicked() {
             d.list_index += 1;
         }
         if ui.button("Add to Dictionary").clicked() {
-            let _ = app.session.run("review.addToDictionary", json!({"word": word}));
+            let _ = app.engine("review.addToDictionary", json!({"word": word}));
             d.list_index += 1;
         }
         if !pick.is_empty() {

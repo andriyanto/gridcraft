@@ -58,6 +58,10 @@ impl SheetApp {
     }
 
     pub fn commit_text_box_edit(&mut self) -> Result<(), String> {
+        if self.text_box_editor.is_some() {
+            // As for a cell draft: entered in the session a background command comes back with.
+            self.wait_for_background();
+        }
         let Some(ed) = self.text_box_editor.take() else { return Ok(()) };
         let result = if self.view_key() != Some((ed.uid, ed.sheet)) {
             Err("The text box's worksheet is no longer active.".into())
@@ -65,7 +69,7 @@ impl SheetApp {
             Ok(())
         } else {
             // Call the engine directly: app.run flushes this draft before saving/switching.
-            self.session.run("shape.setText", json!({"id": ed.id, "text": ed.text})).map(|_| ())
+            self.engine("shape.setText", json!({"id": ed.id, "text": ed.text})).map(|_| ())
         };
         match result {
             Ok(()) => {

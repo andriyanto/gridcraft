@@ -404,7 +404,7 @@ fn handle_press(app: &mut SheetApp, input: &InteractionInput<'_>) {
     }
     if in_corner {
         note_selecting_press(app);
-        let _ = app.session.run("selection.set", json!({"range": RangeRef::all().a1()}));
+        let _ = app.engine("selection.set", json!({"range": RangeRef::all().a1()}));
         return;
     }
     if in_col_header {
@@ -499,7 +499,7 @@ fn handle_press(app: &mut SheetApp, input: &InteractionInput<'_>) {
     app.grid.last_click = Some((c, now));
     if mods.shift {
         note_selecting_press(app);
-        let _ = app.session.run("selection.set", json!({"range": RangeRef::new(sel.anchor, c).a1(), "active": sel.active.a1()}));
+        let _ = app.engine("selection.set", json!({"range": RangeRef::new(sel.anchor, c).a1(), "active": sel.active.a1()}));
         if let Some(d) = app.session.active_mut() {
             d.selection.anchor = sel.anchor;
         }
@@ -517,7 +517,7 @@ fn handle_press(app: &mut SheetApp, input: &InteractionInput<'_>) {
         }
     } else {
         note_selecting_press(app);
-        let _ = app.session.run("selection.set", json!({"cell": c.a1()}));
+        let _ = app.engine("selection.set", json!({"cell": c.a1()}));
         if acts && wb.styles.get(sh.style_id(c)).num_fmt.as_str() == "checkbox" {
             let _ = app.run("cell.toggleCheckbox", json!({"cell": c.a1()}));
         }
@@ -600,7 +600,7 @@ fn handle_context_menu_and_keyboard(app: &mut SheetApp, input: &InteractionInput
         && let Some(p) = pos
     {
         if in_cells && !sel.contains(geo.cell_at(sh, p)) {
-            let _ = app.session.run("selection.set", json!({"cell": geo.cell_at(sh, p).a1()}));
+            let _ = app.engine("selection.set", json!({"cell": geo.cell_at(sh, p).a1()}));
         }
         if in_col_header || in_row_header {
             let (rows, idx) = if in_row_header { (true, geo.row_at(sh, p.y)) } else { (false, geo.col_at(sh, p.x)) };
@@ -613,7 +613,7 @@ fn handle_context_menu_and_keyboard(app: &mut SheetApp, input: &InteractionInput
             });
             if !inside {
                 let range = if rows { RangeRef::rows(idx, idx) } else { RangeRef::cols(idx, idx) };
-                let _ = app.session.run("selection.set", json!({"range": range.a1()}));
+                let _ = app.engine("selection.set", json!({"range": range.a1()}));
             }
             app.grid.header_menu = Some((geo.mirror_pos(p), rows));
         } else {
@@ -660,14 +660,12 @@ fn handle_dragging(app: &mut SheetApp, input: &InteractionInput<'_>) {
             }
             Drag::Rows(anchor) => {
                 let r = geo.row_at(sh, p.y);
-                let _ =
-                    app.session.run("selection.set", json!({"range": RangeRef::rows(anchor.min(r), anchor.max(r)).a1(), "active": sel.active.a1()}));
+                let _ = app.engine("selection.set", json!({"range": RangeRef::rows(anchor.min(r), anchor.max(r)).a1(), "active": sel.active.a1()}));
                 scroll_by(app, vec2(0.0, auto.y));
             }
             Drag::Cols(anchor) => {
                 let c = geo.col_at(sh, p.x);
-                let _ =
-                    app.session.run("selection.set", json!({"range": RangeRef::cols(anchor.min(c), anchor.max(c)).a1(), "active": sel.active.a1()}));
+                let _ = app.engine("selection.set", json!({"range": RangeRef::cols(anchor.min(c), anchor.max(c)).a1(), "active": sel.active.a1()}));
                 scroll_by(app, vec2(auto.x, 0.0));
             }
             drag @ (Drag::PointRows(_) | Drag::PointCols(_)) => {
@@ -693,7 +691,7 @@ fn handle_dragging(app: &mut SheetApp, input: &InteractionInput<'_>) {
                 } else {
                     RangeRef::cols(col, col).a1()
                 };
-                let _ = app.session.run("home.columnWidth", json!({"cols": cols, "width": w.round()}));
+                let _ = app.engine("home.columnWidth", json!({"cols": cols, "width": w.round()}));
                 coalesce_last_undo(app);
             }
             Drag::ResizeRow { row, start, orig } => {
@@ -709,7 +707,7 @@ fn handle_dragging(app: &mut SheetApp, input: &InteractionInput<'_>) {
                 } else {
                     format!("{}:{}", row + 1, row + 1)
                 };
-                let _ = app.session.run("home.rowHeight", json!({"rows": rows, "height": h.round()}));
+                let _ = app.engine("home.rowHeight", json!({"rows": rows, "height": h.round()}));
                 coalesce_last_undo(app);
             }
             Drag::Freeze { cols, .. } => {
@@ -929,7 +927,7 @@ fn select_to_pointer(app: &mut SheetApp, geo: &Geo, sh: &Sheet, wb: &Workbook, p
         let mut ranges: Vec<String> = d.selection.ranges.iter().map(|r| r.a1()).collect();
         ranges.pop();
         ranges.push(RangeRef::new(anchor, cell).a1());
-        let _ = app.session.run("selection.set", json!({"range": ranges.join(","), "active": active.a1()}));
+        let _ = app.engine("selection.set", json!({"range": ranges.join(","), "active": active.a1()}));
         if let Some(d) = app.session.active_mut() {
             d.selection.anchor = anchor;
         }
@@ -1102,7 +1100,7 @@ fn drag_object(app: &mut SheetApp, geo: &Geo, sh: &Sheet, p: Pos2) {
         p.insert("height".into(), json!(y1 - y0));
     }
     let revision = app.session.active().map(|d| d.revision);
-    let _ = app.session.run("object.move", params);
+    let _ = app.engine("object.move", params);
     if stepped {
         coalesce_last_undo(app);
     } else if app.session.active().map(|d| d.revision) != revision
@@ -1121,7 +1119,7 @@ pub fn follow_link(app: &mut SheetApp, target: &str) {
     use gridcraft_engine::links::{LinkKind, classify};
     match classify(target) {
         LinkKind::Internal(r) => {
-            let _ = app.session.run("edit.goTo", json!({"reference": r.trim_start_matches('#')}));
+            let _ = app.engine("edit.goTo", json!({"reference": r.trim_start_matches('#')}));
             app.grid.ensure_visible = true;
         }
         LinkKind::External(url) => app.open_dialog("openLink", json!({"url": url})),

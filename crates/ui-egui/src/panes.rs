@@ -116,9 +116,9 @@ fn watch(app: &mut SheetApp, ui: &mut Ui) {
         && let Some(sh) = d.wb.active()
     {
         let r = format!("{}!{}", gridcraft_engine::formula::quote_sheet(&sh.name), d.selection.active.a1());
-        let _ = app.session.run("formulas.watchWindow", json!({"add": r}));
+        let _ = app.engine("formulas.watchWindow", json!({"add": r}));
     }
-    let list = app.session.run("formulas.watchWindow", json!({})).unwrap_or(Json::Null);
+    let list = app.engine("formulas.watchWindow", json!({})).unwrap_or(Json::Null);
     egui::Grid::new("watch_grid").striped(true).num_columns(4).show(ui, |ui| {
         ui.strong("Cell");
         ui.strong("Value");
@@ -131,7 +131,7 @@ fn watch(app: &mut SheetApp, ui: &mut Ui) {
             ui.label(w["value"].as_str().unwrap_or(""));
             ui.label(w["formula"].as_str().unwrap_or(""));
             if crate::widgets::icon_button(ui, crate::icons::Icon::Close, Tokens::get(ui.ctx()).text_dim, "Delete", vec2(18.0, 18.0)).clicked() {
-                let _ = app.session.run("formulas.watchWindow", json!({"remove": cell}));
+                let _ = app.engine("formulas.watchWindow", json!({"remove": cell}));
             }
             ui.end_row();
         }
@@ -140,7 +140,7 @@ fn watch(app: &mut SheetApp, ui: &mut Ui) {
 
 /// Lists the sheet's objects and dispatches select, bring-forward, send-backward and delete.
 fn selection(app: &mut SheetApp, ui: &mut Ui) {
-    let list = app.session.run("arrange.selectionPane", json!({})).unwrap_or(Json::Null);
+    let list = app.engine("arrange.selectionPane", json!({})).unwrap_or(Json::Null);
     let items = list.as_array().cloned().unwrap_or_default();
     if items.is_empty() {
         ui.label(egui::RichText::new("There are no shapes, pictures or charts on this sheet.").italics());

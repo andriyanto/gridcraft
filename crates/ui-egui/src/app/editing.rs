@@ -79,10 +79,17 @@ impl SheetApp {
     /// showing, that window stays active afterwards; a draft its own workbook refuses
     /// (validation, a bad formula) brings its window back to the front with the draft still open.
     pub fn commit_edit(&mut self, dr: i64, dc: i64, array: bool, fill_selection: bool) -> bool {
+        if self.editor.is_some() {
+            // The draft is checked against its cell and entered in the session a command
+            // running in the background comes back with.
+            self.wait_for_background();
+        }
         let Some((doc, window)) = self.editor.as_ref().map(|ed| (ed.doc, ed.window)) else { return true };
         if !self.draft_elsewhere() {
-            return self.commit_edit_here(dr, dc, array, fill_selection);
+            let background = std::mem::take(&mut self.commit_from_keys);
+            return self.commit_edit_here(dr, dc, array, fill_selection, background);
         }
+        self.commit_from_keys = false;
         // Its window, or (when that window closed) its workbook's most recent one.
         let Some(owner) = window.filter(|w| self.session.window(*w).is_some()).or_else(|| self.session.doc_window(doc)) else {
             self.cancel_edit();
@@ -90,7 +97,7 @@ impl SheetApp {
         };
         let back = self.session.active_window();
         self.session.activate_window(owner);
-        if !self.commit_edit_here(dr, dc, array, fill_selection) {
+        if !self.commit_edit_here(dr, dc, array, fill_selection, false) {
             // Refused: its window stays in front with the draft open and the reason shown.
             return false;
         }
@@ -117,7 +124,19 @@ impl SheetApp {
         self.commit_text_box_edit()
     }
 
-    fn commit_edit_here(&mut self, dr: i64, dc: i64, array: bool, fill_selection: bool) -> bool {
+    /// Commits the cell entry as its own keys ask (Enter, Tab, an arrow). Nothing that follows
+    /// in the frame depends on the entry, so one that takes long goes on in the background: the
+    /// selection moves when it is over, and a refused draft opens again then.
+    pub fn commit_edit_from_keys(&mut self, dr: i64, dc: i64, array: bool, fill_selection: bool, arrow: bool) -> bool {
+        self.commit_from_keys = true;
+        let ok = if arrow { self.commit_edit_arrow(dr, dc) } else { self.commit_edit(dr, dc, array, fill_selection) };
+        self.commit_from_keys = false;
+        ok
+    }
+
+    /// `background`: the entry may go on in the background, where the command allows it; `true`
+    /// is returned then, and what follows the entry happens when it is over.
+    fn commit_edit_here(&mut self, dr: i64, dc: i64, array: bool, fill_selection: bool, background: bool) -> bool {
         // Python code goes in through `python.set`, whichever way the edit is committed (the
         // formula bar's Enter button, a click on the sheet).
         if self.editor.as_ref().is_some_and(|e| e.python) {
@@ -176,7 +195,7 @@ impl SheetApp {
         }
         // Point mode can leave another sheet active; the edit belongs to the sheet it started on.
         if self.session.active().is_some_and(|d| d.wb.active_sheet() != ed.sheet)
-            && let Err(e) = self.session.run("sheet.activate", json!({"sheet": ed.sheet}))
+            && let Err(e) = self.engine("sheet.activate", json!({"sheet": ed.sheet}))
         {
             self.message = Some(("GridCraft".into(), clean_error(&e)));
             self.editor = Some(ed);
@@ -191,12 +210,25 @@ impl SheetApp {
             && self.session.active().and_then(|d| d.wb.sheet(ed.sheet)).is_some_and(|sh| {
                 sh.cell(ed.cell).is_none_or(|c| c.formula.is_none() && c.py.is_none() && c.value == gridcraft_engine::core::Value::Empty)
             });
+        let (id, params) = if fill_selection {
+            ("range.fill", json!({"input": text}))
+        } else {
+            ("cell.set", json!({"cell": ed.cell.a1(), "input": text, "array": array}))
+        };
         let r = if unchanged {
             Ok(json!({}))
-        } else if fill_selection {
-            self.session.run("range.fill", json!({"input": text}))
+        } else if background && self.runs_in_background(id) {
+            let window = self.session.active_window();
+            match self.launch(id, params) {
+                crate::background::Launch::Done(r) => r,
+                crate::background::Launch::Pending(pending) => {
+                    let after = crate::background::After::Edit { draft: Box::new(ed), dr, dc };
+                    self.wait_in_background(id, window, pending, after);
+                    return true;
+                }
+            }
         } else {
-            self.session.run("cell.set", json!({"cell": ed.cell.a1(), "input": text, "array": array}))
+            self.engine(id, params)
         };
         match r {
             Ok(_) => {
@@ -385,8 +417,8 @@ impl SheetApp {
         // other cell (code of spaces is still code). On another cell there is nothing to write.
         let r = match (ed.text.is_empty(), python_cell) {
             (true, false) => return true,
-            (true, true) => self.session.run("cell.set", json!({"sheet": ed.sheet, "cell": ed.cell.a1(), "input": ""})),
-            (false, _) => self.session.run("python.set", json!({"sheet": ed.sheet, "cell": ed.cell.a1(), "code": ed.text})),
+            (true, true) => self.engine("cell.set", json!({"sheet": ed.sheet, "cell": ed.cell.a1(), "input": ""})),
+            (false, _) => self.engine("python.set", json!({"sheet": ed.sheet, "cell": ed.cell.a1(), "code": ed.text})),
         };
         match r {
             Ok(_) => {
@@ -411,12 +443,12 @@ impl SheetApp {
         let run = self.tab_run.take().filter(|&(uid, sheet, _, at)| here == Some((uid, sheet, at)));
         if multi {
             let fwd = dr > 0 || dc > 0;
-            let _ = self.session.run("selection.next", json!({"forward": fwd, "byRow": dc != 0}));
+            let _ = self.engine("selection.next", json!({"forward": fwd, "byRow": dc != 0}));
         } else if let (Some((_, _, col, at)), 1, 0) = (run, dr, dc) {
             let back = i64::from(col) - i64::from(at.col);
-            let _ = self.session.run("selection.move", json!({"dr": 1, "dc": back}));
+            let _ = self.engine("selection.move", json!({"dr": 1, "dc": back}));
         } else {
-            let _ = self.session.run("selection.move", json!({"dr": dr, "dc": dc}));
+            let _ = self.engine("selection.move", json!({"dr": dr, "dc": dc}));
             if dr == 0 && dc != 0 {
                 let start = run.map(|r| r.2);
                 self.tab_run = self.session.active().and_then(|d| {

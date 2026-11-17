@@ -325,6 +325,11 @@ fn main() -> eframe::Result<()> {
         log::warn!("sample {s}: {e}");
     }
     let mut app = SheetApp::new(session, services());
+    // Commands that take long run off the interface thread, so the window stays alive and
+    // offers Cancel. `GRIDCRAFT_BACKGROUND=0` runs every command here, as before.
+    if std::env::var_os("GRIDCRAFT_BACKGROUND").is_none_or(|v| v != "0") {
+        app.background = Some(gridcraft_ui_egui::background::Config::default());
+    }
     app.watch_desktop_theme();
     app.start_update_check();
     let control_port = control_port;

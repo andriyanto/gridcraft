@@ -6,22 +6,69 @@ use super::{
 impl SheetApp {
     /// Runs an engine command (or a UI command) and handles UI requests it makes.
     pub fn run(&mut self, id: &str, params: Json) -> Result<Json, String> {
+        // The caller goes on with the result: a command still running in the background, and
+        // what waits behind it, is over first.
+        self.finish_background(id);
         let r = self.run_command(id, params);
-        // This copy leaves the system clipboard alone: note what it holds, so Paste can tell
-        // that GridCraft's copy is newer while that text is still there.
+        self.note_copy(id, &r);
+        r
+    }
+
+    /// After a copy or cut that leaves the system clipboard alone: notes what the clipboard
+    /// holds, so Paste can tell that GridCraft's copy is newer while that text is still there.
+    pub(crate) fn note_copy(&mut self, id: &str, r: &Result<Json, String>) {
         if matches!(id, "edit.copy" | "edit.cut") && r.is_ok() {
             self.clipboard_text_at_copy = self.system_clipboard_text();
             self.cut_text = if id == "edit.cut" { self.clipboard_text_at_copy.clone() } else { None };
         }
-        r
+    }
+
+    /// `run` for a caller that does not use the result (`after` says what follows the command
+    /// instead). `None` when the command went on in the background (see [`crate::background`]).
+    pub(crate) fn run_detached(&mut self, id: &str, params: Json, after: crate::background::After) -> Option<Result<Json, String>> {
+        if !self.runs_in_background(id) {
+            return Some(self.run(id, params));
+        }
+        if let Some(r) = self.before_engine(id, &params) {
+            return Some(r);
+        }
+        let window = self.session.active_window();
+        match self.launch(id, params) {
+            crate::background::Launch::Done(r) => {
+                let r = self.after_command(id, window, r);
+                self.note_copy(id, &r);
+                Some(r)
+            }
+            crate::background::Launch::Pending(pending) => {
+                self.wait_in_background(id, window, pending, after);
+                None
+            }
+        }
     }
 
     pub(super) fn run_command(&mut self, id: &str, params: Json) -> Result<Json, String> {
+        if let Some(r) = self.before_engine(id, &params) {
+            return r;
+        }
+        let before = self.session.active_window();
+        let zoom_from = matches!(id, "view.zoom" | "view.zoom100" | "view.zoomToSelection").then(|| crate::grid::Trace::key(self));
+        let r = self.engine(id, params);
+        if let Some(from) = zoom_from {
+            crate::grid::Trace::keep_through_zoom(self, from);
+        }
+        self.after_command(id, before, r)
+    }
+
+    /// What comes before an engine command: drafts are settled, and a command of the interface's
+    /// own runs here. `Some` with the result when that was all there was to do.
+    pub(crate) fn before_engine(&mut self, id: &str, params: &Json) -> Option<Result<Json, String>> {
         let switches_window = id.starts_with("window.")
             || matches!(id, "view.newWindow" | "view.hideWindow" | "view.unhideWindow")
             || (id == "view.switchWindows" && ["window", "doc"].iter().any(|k| params.get(*k).is_some_and(|d| !d.is_null())));
-        if id.starts_with("file.") || switches_window {
-            self.settle_drafts()?;
+        if (id.starts_with("file.") || switches_window)
+            && let Err(e) = self.settle_drafts()
+        {
+            return Some(Err(e));
         }
         if matches!(id, "file.save" | "file.saveAs" | "file.saveBytes") {
             self.store_view_state();
@@ -40,26 +87,26 @@ impl SheetApp {
                 | "edit.redo"
                 | "object.delete"
                 | "object.move"
-        ) {
-            self.commit_text_box_edit()?;
+        ) && let Err(e) = self.commit_text_box_edit()
+        {
+            return Some(Err(e));
         }
-        if let Some(r) = self.run_ui_command(id, &params) {
-            return r;
+        if let Some(r) = self.run_ui_command(id, params) {
+            return Some(r);
         }
         // The macro editor's unsaved draft is part of its workbook: closing the workbook asks
         // about it first, and goes on once the editor has closed. A close asked while it is
         // asking waits for the answer, or is refused when it asks for a different close.
         if matches!(id, "file.close" | "window.close")
-            && let Some(r) = crate::macro_editor::ask_before_closing(self, id, &params)
+            && let Some(r) = crate::macro_editor::ask_before_closing(self, id, params)
         {
-            return r;
+            return Some(r);
         }
-        let before = self.session.active_window();
-        let zoom_from = matches!(id, "view.zoom" | "view.zoom100" | "view.zoomToSelection").then(|| crate::grid::Trace::key(self));
-        let r = self.session.run(id, params);
-        if let Some(from) = zoom_from {
-            crate::grid::Trace::keep_through_zoom(self, from);
-        }
+        None
+    }
+
+    /// What follows an engine command that ran in the window that was active `before` it.
+    pub(crate) fn after_command(&mut self, id: &str, before: Option<u64>, r: Result<Json, String>) -> Result<Json, String> {
         if id.starts_with("file.") && self.session.active_window() != before {
             // File › New or Open from the Backstage view: the window it was in goes back to its sheet.
             self.backstage = None;
@@ -100,6 +147,10 @@ impl SheetApp {
     }
 
     pub fn run_or_alert(&mut self, id: &str, params: Json) {
+        // Asked for while a command runs in the background: it waits its turn.
+        if self.is_busy() {
+            return self.queue_command(id, params);
+        }
         // A menu/shortcut opens the settings first; the Print page's button submits explicitly.
         if id == "file.print" {
             if self.services.print_native.is_some() {
@@ -126,16 +177,16 @@ impl SheetApp {
             self.open_switch_windows = true;
             return;
         }
-        match self.run(id, params) {
+        match self.run_detached(id, params, crate::background::After::Alert) {
             // A refused cell draft already shows its own message (with the rule's title).
-            Err(e) if self.message.as_ref().is_some_and(|(_, m)| *m == e) => {}
-            Err(e) => self.alert(e),
-            Ok(_) => {}
+            Some(Err(e)) if self.message.as_ref().is_some_and(|(_, m)| *m == e) => {}
+            Some(Err(e)) => self.alert(e),
+            Some(Ok(_)) | None => {}
         }
     }
 
     /// Shows a command error: a toast for an unavailable command, else a message box.
-    pub(super) fn alert(&mut self, e: String) {
+    pub(crate) fn alert(&mut self, e: String) {
         // Shown in the window the user ends up in, also after a command that switched windows.
         self.follow_active_window();
         if e.contains("is not available right now") {

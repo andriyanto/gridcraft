@@ -85,6 +85,9 @@ impl SheetApp {
             arrange_windows: None,
             #[cfg(not(target_arch = "wasm32"))]
             updates_rt: Default::default(),
+            background: None,
+            background_state: Default::default(),
+            commit_from_keys: false,
         }
     }
 
@@ -106,6 +109,8 @@ impl SheetApp {
     /// Per-frame logic (control channel, screenshots). Call before `ui`.
     pub fn logic(&mut self, ctx: &egui::Context) {
         self.ensure_text_width(ctx);
+        // First: the rest of the frame sees the session of a command that is over.
+        self.poll_background(ctx);
         // A keytip control request lives one frame: the ribbon consumes it during `ui`, and
         // anything that never reached a control (collapsed ribbon, tab switch) is dropped. One
         // made with a switch to the control's tab waits, with its window, for the next `ui` of
@@ -131,16 +136,23 @@ impl SheetApp {
         // Screenshot results, deadlines and geometry validation belong to `logic`; `ui` only
         // issues the capture command (after every widget, so a command cannot be missed).
         control::drain_screenshots(self, ctx);
-        control::poll(self, ctx);
+        // While a command runs in the background the session here is a stand-in: requests,
+        // files that finished loading and AutoSave wait for the real one.
+        let busy = self.is_busy();
+        if !busy {
+            control::poll(self, ctx);
+        }
         // Printing feedback is polled once per frame, here, so hidden windows and logic-only
         // frames still see worker completion. `ui` and the desktop app no longer poll it.
         self.poll_printing(ctx);
         self.guard_window_close(ctx);
         #[cfg(not(target_arch = "wasm32"))]
         updates_ui::tick(self, ctx);
-        // Files read asynchronously (web file picker, dropped files).
-        self.poll_async_opens();
-        self.autosave(ctx);
+        if !busy {
+            // Files read asynchronously (web file picker, dropped files).
+            self.poll_async_opens();
+            self.autosave(ctx);
+        }
         self.update_title(ctx);
         self.request_hidden_paint(ctx);
         // One window always shows a workbook, unless each workbook has a native window of its own
@@ -199,11 +211,14 @@ impl SheetApp {
         // This window's key tip request that waited for this frame (its tab or ribbon was just
         // shown); any other window's request was dropped before it.
         self.ui.keytip_invoke = self.ui.keytip_invoke_next.take();
+        // A command is running in the background: this window's keys wait too.
+        self.hold_window_input(&ctx);
         text_box::before_ui(self, &ctx);
         // Another window came forward without going through a command (which settles drafts
         // first): the draft goes into its own window instead of floating over this one. If its
-        // workbook refuses it, its window comes back to the front with the draft open.
-        if self.draft_elsewhere() {
+        // workbook refuses it, its window comes back to the front with the draft open. (Not
+        // while a command runs in the background: the draft is entered once it is over.)
+        if !self.is_busy() && self.draft_elsewhere() {
             self.commit_edit(0, 0, false, false);
         }
         // The language the widgets translate with this frame (see `i18n::current`).
@@ -250,6 +265,7 @@ impl SheetApp {
         macro_ui::question_box(self, &ctx);
         widgets::message_box(self, &ctx);
         widgets::toast(self, &ctx);
+        crate::background::overlay(self, &ctx);
         // Requests are admitted in `logic`, for the root viewport, so only its pass issues them.
         if ctx.viewport_id() == egui::ViewportId::ROOT {
             control::issue_screenshots(self, &ctx);

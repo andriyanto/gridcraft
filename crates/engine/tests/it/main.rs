@@ -33,6 +33,7 @@ mod sheet_copy_spill;
 mod sheet_name_quoting;
 mod sparse_clear_invalidation;
 mod stale_spills;
+mod stand_in;
 mod stored_list_shape;
 mod structural_edit_rewrite;
 mod table_filter_save;

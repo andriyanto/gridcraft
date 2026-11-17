@@ -342,7 +342,7 @@ pub(crate) fn dispatch(app: &mut SheetApp, ctx: &egui::Context, key: Key, physic
             let cols = (width / sh.default_col_width.max(1.0)).floor().max(1.0) as i64;
             let dc = if shortcut == Shortcut::ScreenRight { cols } else { -cols };
             let from = app.session.active().map(|d| if m.shift { d.selection.moving_end() } else { d.selection.active });
-            let _ = app.session.run("selection.move", json!({"dr": 0, "dc": dc, "extend": m.shift}));
+            let _ = app.engine("selection.move", json!({"dr": 0, "dc": dc, "extend": m.shift}));
             app.grid.ensure_visible = true;
             app.grid.reveal_moving_end = m.shift;
             app.grid.reveal_from = from;
@@ -376,7 +376,7 @@ fn edit_with(app: &mut SheetApp, text: String) {
 
 /// Selects `anchor`..`to`, keeping the anchor and the active cell.
 fn extend(app: &mut SheetApp, anchor: CellRef, active: CellRef, to: CellRef) {
-    let _ = app.session.run("selection.set", json!({"range": RangeRef::new(anchor, to).a1(), "active": active.a1()}));
+    let _ = app.engine("selection.set", json!({"range": RangeRef::new(anchor, to).a1(), "active": active.a1()}));
     if let Some(d) = app.session.active_mut() {
         d.selection.anchor = anchor;
     }

@@ -92,14 +92,16 @@ pub(crate) struct SelectionPaintInput<'a> {
 
 pub(crate) fn paint_selection(input: SelectionPaintInput<'_>) {
     let SelectionPaintInput { painter: p, geo, sheet: sh, selection: sel, outline, tokens: t, app, rows, cols } = input;
+    // Not while a formula from another sheet points here: only what it points at is marked.
+    let shown = !app.pointing_on_another_sheet();
     // Fill all areas except the active cell.
-    for rect in selection_fill_where(geo, sh, sel, outline, |r| range_in_pane(*r, rows, cols)) {
+    for rect in selection_fill_where(geo, sh, sel, outline, |r| shown && range_in_pane(*r, rows, cols)) {
         p.rect_filled(rect, 0.0, t.sel_fill);
     }
     let active_range = sh.merge_at(sel.active).unwrap_or_else(|| RangeRef::cell(sel.active));
     let active = active_rect(geo, sh, sel);
-    let active_here = range_in_pane(active_range, rows, cols);
-    let cur_here = range_in_pane(sel.current(), rows, cols);
+    let active_here = shown && range_in_pane(active_range, rows, cols);
+    let cur_here = shown && range_in_pane(sel.current(), rows, cols);
     // Editing a formula: outline its references instead of the selection.
     if let Some(ed) = &app.editor
         && ed.is_formula()

@@ -280,7 +280,7 @@ scrollbar bugs 2–4 · pixel/feel pass against observed Excel 7–12.
 
 | Date | Change | Summary |
 |---|---|---|
-| 2026-11-17 | minor | A formula typed in a cell and pointed at another sheet keeps the keyboard there: Enter enters it, Esc cancels it, typing and the arrow keys go on. The in-cell editor, which had the keys, is drawn on the formula's own sheet only, so nothing took them until the formula bar was clicked. The formula bar now stands in for it while another sheet is shown, and a click on a sheet tab leaves the keyboard with the formula |
+| 2026-11-17 | minor | A formula typed in a cell and pointed at another sheet keeps the keyboard there: Enter enters it, Esc cancels it, typing and the arrow keys go on. The in-cell editor, which had the keys, is drawn on the formula's own sheet only, so nothing took them until the formula bar was clicked. The formula bar now stands in for it while another sheet is shown, and a click on a sheet tab leaves the keyboard with the formula. The sheet pointed at does not draw its own selection meanwhile (outline, fill, header marks): only the cells the formula points at are marked |
 | 2026-11-17 | minor | A command that calculates for long runs off the interface thread in the desktop app: the window keeps painting, and a box offers Cancel (Esc). Keys, dropped files and the close button wait until it is over |
 | 2026-11-05 | minor | Reconcile upstream form-control coverage with the CJK baseline and cell-alignment updates |
 | 2026-11-04 | minor | Keep centered emoji and symbol fallback placement when a row starts with a fallback or contains only fallbacks; use primary or baseline-aligned glyphs to anchor cell alignment |

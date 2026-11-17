@@ -225,7 +225,7 @@ pub fn show(app: &mut SheetApp, ui: &mut egui::Ui) {
     // Headers.
     if sh.show_headings {
         let headings = table_headings(&geo, sh, sel.active);
-        paint_headers(&painter, &geo, sh, &sel, &t, &quads, &headings);
+        paint_headers(&painter, &geo, sh, (&sel, !app.pointing_on_another_sheet()), &t, &quads, &headings);
         paint_freeze_handles(&painter, &geo, sh, &app.grid.drag, &t);
     }
     crate::outline::paint(&painter, &geo, sh, &t);
@@ -577,11 +577,13 @@ pub(crate) fn horizontal_scrollbar(app: &mut SheetApp, ui: &mut egui::Ui, track:
     }
 }
 
+/// `selection`: the sheet's selection, and whether it is drawn (its columns and rows are then
+/// marked in the headers).
 pub(crate) fn paint_headers(
     p: &Painter,
     geo: &Geo,
     sh: &Sheet,
-    sel: &gridcraft_engine::Selection,
+    selection: (&gridcraft_engine::Selection, bool),
     t: &Tokens,
     quads: &[PaneQuad],
     headings: &[TableHeading],
@@ -593,11 +595,12 @@ pub(crate) fn paint_headers(
     let left = Rect::from_min_max(pos2(r.left(), geo.cells.top()), pos2(geo.cells.left(), r.bottom()));
     p.rect_filled(top, 0.0, t.header_bg);
     p.rect_filled(left, 0.0, t.header_bg);
+    let (sel, shown) = selection;
     let bounds = sel.bounds();
-    let col_sel = |c: u32| sel.ranges.iter().any(|x| c >= x.start.col && c <= x.end.col);
-    let row_sel = |rr: u32| sel.ranges.iter().any(|x| rr >= x.start.row && rr <= x.end.row);
-    let full_col = |c: u32| sel.ranges.iter().any(|x| x.is_full_cols() && c >= x.start.col && c <= x.end.col);
-    let full_row = |rr: u32| sel.ranges.iter().any(|x| x.is_full_rows() && rr >= x.start.row && rr <= x.end.row);
+    let col_sel = |c: u32| shown && sel.ranges.iter().any(|x| c >= x.start.col && c <= x.end.col);
+    let row_sel = |rr: u32| shown && sel.ranges.iter().any(|x| rr >= x.start.row && rr <= x.end.row);
+    let full_col = |c: u32| shown && sel.ranges.iter().any(|x| x.is_full_cols() && c >= x.start.col && c <= x.end.col);
+    let full_row = |rr: u32| shown && sel.ranges.iter().any(|x| x.is_full_rows() && rr >= x.start.row && rr <= x.end.row);
     let _ = bounds;
     // Hidden columns and rows leave a double divider where they sit, as in Excel.
     let hidden_mark = Stroke::new(1.0, t.header_text.gamma_multiply(0.6));

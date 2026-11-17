@@ -187,6 +187,43 @@ mod keys {
         assert_eq!(formula(&h, 0, "B2").as_deref(), Some("Sheet2!D6+1"));
     }
 
+    /// How many sides of the selection's outline were painted over the cells last frame.
+    fn outline_sides(h: &H) -> usize {
+        let cells = h.state().grid.cells_rect.unwrap();
+        let green = gridcraft_ui_egui::theme::Tokens::get(&h.ctx).sel_border;
+        h.output()
+            .shapes
+            .iter()
+            .filter(|s| match &s.shape {
+                egui::Shape::Rect(r) => r.fill == green && cells.expand(2.0).contains_rect(r.rect) && r.rect.width().min(r.rect.height()) <= 3.0,
+                _ => false,
+            })
+            .count()
+    }
+
+    /// The other sheet's own selection is not drawn while the formula points at its cells: a
+    /// click there picks a cell for the formula and leaves that selection where it was, so its
+    /// green box read as a pointer that did not follow.
+    #[test]
+    fn the_other_sheet_s_selection_is_not_drawn_while_pointing_at_it() {
+        let mut h = pointing_at_sheet2();
+        h.run_steps(2);
+        assert_eq!(outline_sides(&h), 0, "no green box on the sheet pointed at");
+        let d = h.state().session.active().unwrap();
+        assert_eq!((d.wb.active_sheet(), d.selection.a1()), (1, "A1".to_string()), "its selection is where it was");
+        // The formula's own sheet shows the cell being edited, as always.
+        let tab = tab_pos(&h, "Sheet1");
+        click_at(&mut h, tab);
+        assert!(outline_sides(&h) > 0, "the cell being edited is outlined on its own sheet");
+        key(&mut h, Key::Enter);
+        assert!(outline_sides(&h) > 0);
+        // And once the formula is entered the other sheet shows its selection again.
+        let tab = tab_pos(&h, "Sheet2");
+        click_at(&mut h, tab);
+        assert_eq!(h.state().session.active().unwrap().wb.active_sheet(), 1);
+        assert!(outline_sides(&h) > 0, "the selection is drawn again");
+    }
+
     #[test]
     fn esc_cancels_a_formula_that_points_at_another_sheet() {
         let mut h = pointing_at_sheet2();

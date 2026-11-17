@@ -20,6 +20,8 @@ thread_local! {
     static SENT: RefCell<Vec<(ViewportId, ViewportCommand)>> = const { RefCell::new(Vec::new()) };
     /// Input events for the root window's next frame (a key pressed in it).
     static EVENTS: RefCell<Vec<egui::Event>> = const { RefCell::new(Vec::new()) };
+    /// Where each window other than the root's was asked to open (its builder's position).
+    static PLACED: RefCell<egui::ViewportIdMap<Option<egui::Pos2>>> = RefCell::new(egui::ViewportIdMap::default());
 }
 
 fn record(mut out: egui::FullOutput) {
@@ -45,6 +47,7 @@ impl Desk {
         ctx.set_embed_viewports(false);
         Context::set_immediate_viewport_renderer(|ctx, viewport| {
             let id = viewport.ids.this;
+            PLACED.with(|p| p.borrow_mut().insert(id, viewport.builder.position));
             let mut input = RawInput { viewport_id: id, ..RawInput::default() };
             input.viewports = INFOS.with(|i| i.borrow().clone());
             input.viewports.entry(id).or_default().parent = Some(viewport.ids.parent);
@@ -574,4 +577,138 @@ fn quit_with_a_draft_in_one_window_and_unsaved_cells_in_another_asks_in_order_an
     assert_eq!(desk.app.dialog.as_ref().map(|d| d.name()), Some("macroEditor"), "no Save Changes question followed");
     assert_eq!(desk.app.session.documents().len(), 2);
     assert_eq!(desk.windows.shown_windows(), [w1, w2]);
+}
+
+/// Two workbooks in two windows, Book2's focused, and a command of Book2's held back on the
+/// worker thread ([`gridcraft_ui_egui::background`]). Returns the windows and the flag that
+/// lets the command go.
+fn busy_in_book2(desk: &mut Desk) -> (u64, u64, std::sync::Arc<std::sync::atomic::AtomicBool>) {
+    use gridcraft_ui_egui::background::Config;
+    desk.app.run("file.new", json!({})).unwrap();
+    desk.frames(3);
+    let (w1, w2) = (desk.window_of(0), desk.window_of(1));
+    let (v1, v2) = (desk.viewport(w1), desk.viewport(w2));
+    INFOS.with(|i| {
+        let mut i = i.borrow_mut();
+        i.entry(v1).or_default().focused = Some(false);
+        i.entry(v2).or_default().focused = Some(true);
+    });
+    desk.frames(2);
+    assert_eq!(desk.app.session.active_window(), Some(w2));
+    let hold = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(true));
+    desk.app.background = Some(Config { wait: std::time::Duration::ZERO, hold: Some(hold.clone()) });
+    desk.frame_with(|app, _| app.run_or_alert("cell.set", json!({"cell": "A1", "input": "slow"})));
+    assert!(desk.app.is_busy());
+    (w1, w2, hold)
+}
+
+/// Frames until the background command is over.
+fn until_idle(desk: &mut Desk) -> Vec<(ViewportId, ViewportCommand)> {
+    let mut sent = Vec::new();
+    for _ in 0..5000 {
+        sent.extend(desk.frames(1));
+        if !desk.app.is_busy() {
+            sent.extend(desk.frames(2));
+            return sent;
+        }
+        std::thread::sleep(std::time::Duration::from_millis(1));
+    }
+    panic!("the command never came back");
+}
+
+/// A command calculates in Book2's window and the person goes on to Book1's meanwhile. When the
+/// command is over Book1's window is still the one they are in: the session that comes back had
+/// Book2's window active, which read as a command bringing that window forward, so it was
+/// focused again and menu commands went to it while the keyboard was in Book1's.
+#[test]
+fn a_window_moved_to_while_another_calculates_stays_the_active_one() {
+    let mut desk = Desk::new(true);
+    let (w1, w2, hold) = busy_in_book2(&mut desk);
+    let (v1, v2) = (desk.viewport(w1), desk.viewport(w2));
+    INFOS.with(|i| {
+        let mut i = i.borrow_mut();
+        i.entry(v1).or_default().focused = Some(true);
+        i.entry(v2).or_default().focused = Some(false);
+    });
+    desk.frames(3);
+    assert!(desk.app.is_busy());
+    hold.store(false, std::sync::atomic::Ordering::Relaxed);
+    let sent = until_idle(&mut desk);
+    assert_eq!(
+        desk.app.session.documents()[1].wb.active().unwrap().value(CellRef::new(0, 0)),
+        Value::text("slow"),
+        "the command ran in its workbook"
+    );
+    assert_eq!(desk.app.session.active_window(), Some(w1), "the window the person is in");
+    assert!(!sent_to(&sent, v2, &ViewportCommand::Focus), "Book2's window is not brought forward: {sent:?}");
+    // And what the menu bar asks for goes to it.
+    desk.app.run("cell.set", json!({"cell": "B1", "input": "menu"})).unwrap();
+    assert_eq!(desk.app.session.documents()[0].wb.active().unwrap().value(CellRef::new(0, 1)), Value::text("menu"));
+    assert_eq!(desk.app.session.documents()[1].wb.active().unwrap().value(CellRef::new(0, 1)), Value::Empty);
+}
+
+/// A command run for its result from another window than the one calculating waits for the
+/// calculation, and then runs in the window that asked: not in the one the session that comes
+/// back had active.
+#[test]
+fn a_command_asked_in_another_window_while_one_calculates_runs_in_its_own() {
+    let mut desk = Desk::new(true);
+    let (w1, w2, hold) = busy_in_book2(&mut desk);
+    let (v1, v2) = (desk.viewport(w1), desk.viewport(w2));
+    INFOS.with(|i| {
+        let mut i = i.borrow_mut();
+        i.entry(v1).or_default().focused = Some(true);
+        i.entry(v2).or_default().focused = Some(false);
+    });
+    desk.frames(3);
+    let release = std::thread::spawn(move || {
+        std::thread::sleep(std::time::Duration::from_millis(30));
+        hold.store(false, std::sync::atomic::Ordering::Relaxed);
+    });
+    desk.app.run("cell.set", json!({"cell": "C3", "input": "asked in Book1"})).unwrap();
+    release.join().unwrap();
+    assert!(!desk.app.is_busy());
+    let cell = |doc: usize, row, col| desk.app.session.documents()[doc].wb.active().unwrap().value(CellRef::new(row, col));
+    assert_eq!(cell(0, 2, 2), Value::text("asked in Book1"));
+    assert_eq!(cell(1, 2, 2), Value::Empty, "nothing was written into the workbook that calculated");
+    assert_eq!(cell(1, 0, 0), Value::text("slow"));
+}
+
+/// The person stays in the window that calculates: nothing changes for them.
+#[test]
+fn the_window_that_calculated_stays_active_when_nobody_left_it() {
+    let mut desk = Desk::new(true);
+    let (_, w2, hold) = busy_in_book2(&mut desk);
+    desk.frames(3);
+    hold.store(false, std::sync::atomic::Ordering::Relaxed);
+    until_idle(&mut desk);
+    assert_eq!(desk.app.session.active_window(), Some(w2));
+    assert_eq!(desk.app.session.documents()[1].wb.active().unwrap().value(CellRef::new(0, 0)), Value::text("slow"));
+}
+
+/// A workbook opened while the window before it is maximized gets a window on the screen. On
+/// Windows a maximized window starts a few points above and left of its monitor (its resize
+/// border is outside it). WordCraft took the monitor from that corner, found one up and to the
+/// left that isn't there, and opened the next document's window on it: listed in the taskbar,
+/// never seen. Here the window library places it, on the monitor the maximized window covers.
+#[test]
+fn a_workbook_opened_after_a_maximized_window_opens_on_the_screen() {
+    let mut desk = Desk::new(true);
+    let monitor = egui::vec2(1280.0, 800.0);
+    INFOS.with(|i| {
+        let mut i = i.borrow_mut();
+        let root = i.entry(ViewportId::ROOT).or_default();
+        root.focused = Some(true);
+        root.maximized = Some(true);
+        root.monitor_size = Some(monitor);
+        root.outer_rect = Some(egui::Rect::from_min_size(egui::pos2(-5.3, -5.3), egui::vec2(1290.6, 770.6)));
+        root.inner_rect = Some(egui::Rect::from_min_size(egui::pos2(0.0, 20.0), egui::vec2(1280.0, 740.0)));
+    });
+    desk.frames(2);
+    desk.app.run("file.new", json!({})).unwrap();
+    desk.frames(3);
+    let opened = desk.viewport(desk.window_of(1));
+    let at = PLACED.with(|p| p.borrow().get(&opened).copied()).flatten().expect("the new window is given a place");
+    assert!(at.x >= 0.0 && at.y >= 0.0, "not above or left of the screen: {at:?}");
+    assert!(at.x < monitor.x - 200.0 && at.y < monitor.y - 200.0, "its title bar and a good part of it are on the screen: {at:?}");
 }

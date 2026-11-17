@@ -215,12 +215,13 @@ impl DocWindows {
             }
         }
         let target = requested.or_else(|| self.list.active().and_then(|id| self.list.get(id).copied()));
-        // While a command runs in the background the session here stands in for the one it runs
-        // in: the window that came forward becomes the active one when the command is over (this
-        // runs every frame), and a draft left behind stays open in its window.
-        let target = target.filter(|_| !app.is_busy());
         if let Some(target) = target.filter(|w| app.session.window(*w).is_some()) {
+            // (Not while a command runs in the background: a draft left behind stays open in its
+            // window, and is entered in the session the command comes back with. The window
+            // moved to is the active one all the same, in the session that stands in meanwhile
+            // and, when the command is over, in the real one: see `background`.)
             if requested.is_none()
+                && !app.is_busy()
                 && let Some(previous) = focused.filter(|p| *p != target && app.session.window(*p).is_some())
             {
                 // The user moved to another window: the previous window's draft is entered there,

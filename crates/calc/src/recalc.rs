@@ -38,6 +38,38 @@ pub use graph::{FxHasher, Graph, Key};
 use graph::{HashMap, HashSet, Node, Taken};
 use pass_host::{PassHost, spills_as_before};
 
+/// A way to stop a recalculation from outside it: another thread asks, and the recalculation
+/// stops at the next formula it would start.
+///
+/// A recalculation that stopped has written nothing for the round it was in, and the workbook
+/// it worked on is partly calculated: whoever holds it throws it away and builds the graph again
+/// for the workbook it keeps (`Calc::rebuild`). One formula is never cut short, so stopping
+/// takes as long as the formula that is running.
+#[derive(Debug, Default)]
+pub struct Interrupt {
+    requested: std::sync::atomic::AtomicBool,
+    hit: std::sync::atomic::AtomicBool,
+}
+
+impl Interrupt {
+    /// Asks the recalculations that hold this to stop.
+    pub fn request(&self) {
+        self.requested.store(true, std::sync::atomic::Ordering::Relaxed);
+    }
+    pub fn is_requested(&self) -> bool {
+        self.requested.load(std::sync::atomic::Ordering::Relaxed)
+    }
+    /// Whether a recalculation stopped because it was asked to, since the last `reset`.
+    pub fn was_hit(&self) -> bool {
+        self.hit.load(std::sync::atomic::Ordering::Relaxed)
+    }
+    /// Forgets the request and that it was met: before the next piece of work that may be stopped.
+    pub fn reset(&self) {
+        self.requested.store(false, std::sync::atomic::Ordering::Relaxed);
+        self.hit.store(false, std::sync::atomic::Ordering::Relaxed);
+    }
+}
+
 /// Calculation state kept beside a workbook.
 #[derive(Clone, Debug)]
 pub struct Calc {
@@ -62,6 +94,12 @@ pub struct Calc {
     /// starts over when the sheets hold or feed half the formulas of the workbook, which is quicker
     /// and gives the same graph and values.
     pub always_scoped: bool,
+    /// Stops a recalculation when asked to (see [`Interrupt`]). `None`: nothing can stop one.
+    pub interrupt: Option<std::sync::Arc<Interrupt>>,
+    /// The last recalculation stopped after it had written values back (those of the formulas
+    /// whose spills changed are calculated in further rounds): the sets kept beside the graph
+    /// follow what it wrote. See [`Calc::restore_after_stop`].
+    stopped_after_writing: bool,
 }
 
 /// A set of cells by row, each row's columns in their own set: a window of rows and columns is
@@ -118,6 +156,8 @@ impl Default for Calc {
             spill_errors: SpillErrors::default(),
             hidden_row_readers: HashSet::default(),
             always_scoped: false,
+            interrupt: None,
+            stopped_after_writing: false,
         }
     }
 }
@@ -239,6 +279,29 @@ impl Calc {
             self.graph.insert((si, c), Node { areas: Vec::new(), dynamic: false });
         }
         false
+    }
+
+    /// Makes this the calculation state of `wb` again, after a recalculation of an edited copy
+    /// of `wb` was stopped ([`Interrupt`]) and the copy dropped.
+    ///
+    /// `changed` is what `cells_changed` or `rows_shown_or_hidden` was given: the graph was
+    /// updated for those cells alone, so they are read again from `wb`, which costs as much as
+    /// the edit was large. `None` after any other recalculation, and whenever the stopped one
+    /// had already written values back: everything is built again from `wb`.
+    pub fn restore_after_stop(&mut self, wb: &Workbook, changed: Option<&[Key]>) {
+        let Some(changed) = changed.filter(|_| !self.stopped_after_writing) else {
+            self.rebuild(wb);
+            return;
+        };
+        for &k in changed {
+            self.graph.remove(k);
+            self.hidden_row_readers.remove(&k);
+            self.spill_errors.remove(&k);
+            if let Some(cell) = wb.sheet(k.0).and_then(|s| s.cell(k.1)) {
+                self.read_cell(wb, k, cell);
+            }
+        }
+        self.graph.settle();
     }
 
     /// The circular references of a rebuilt workbook (after undo, redo or a rollback, which put
@@ -546,6 +609,11 @@ impl Calc {
                 areas.push((k.0, *r));
             }
         }
+        // Before the walk of everything that reads the changed cells.
+        if self.interrupt.as_ref().is_some_and(|interrupt| interrupt.is_requested()) {
+            self.stop(0, None);
+            return;
+        }
         let t0 = prof_now();
         let dirty = self.dirty_closure(wb, &seeds, &areas);
         let t1 = prof_now();
@@ -616,9 +684,17 @@ impl Calc {
     fn run(&mut self, wb: &mut Workbook, mut dirty: Vec<Key>, mut spilled: Option<HashSet<Key>>) {
         let mut dynamic_again = !self.graph.dynamic.is_empty();
         self.last_recalc_cells = 0;
-        for _round in 0..8 {
+        self.stopped_after_writing = false;
+        // The loops listed, put back when the recalculation is stopped.
+        let circular = self.interrupt.as_ref().map(|_| self.circular.clone());
+        for round in 0..8 {
             if dirty.is_empty() {
                 break;
+            }
+            // Before the round is set up, which for a large one takes as long as many formulas.
+            if self.interrupt.as_ref().is_some_and(|interrupt| interrupt.is_requested()) {
+                self.stop(round, circular);
+                return;
             }
             // Row-major order is a good topological guess; on-demand evaluation fixes the rest.
             dirty.sort_by_key(|(s, c)| (*s, c.row, c.col));
@@ -638,8 +714,18 @@ impl Calc {
             let (results, spills, cycles) = {
                 let mut host = PassHost::new(wb, &exprs, &mut rng, now).with_python(python);
                 host.iterate = wb.calc.iterative;
+                host.interrupt = self.interrupt.as_deref();
                 for k in &dirty {
                     host.calculate(*k);
+                    if host.interrupted {
+                        break;
+                    }
+                }
+                if host.interrupted {
+                    // Asked to stop: what was calculated so far is not written.
+                    drop(host);
+                    self.stop(round, circular);
+                    return;
                 }
                 if host.iterate && !host.members.is_empty() {
                     let passes = host.iterate_loops(&dirty, wb.calc.max_iterations, wb.calc.max_change);
@@ -689,6 +775,20 @@ impl Calc {
             self.circular.clear();
         } else {
             self.circular.retain(|k| self.graph.nodes.contains_key(k));
+        }
+    }
+
+    /// Notes that the recalculation stopped in `round` because it was asked to: the caller drops
+    /// the workbook (see [`Interrupt`]). `circular` is the loops listed when it began.
+    fn stop(&mut self, round: usize, circular: Option<Vec<Key>>) {
+        if let Some(interrupt) = &self.interrupt {
+            interrupt.hit.store(true, std::sync::atomic::Ordering::Relaxed);
+        }
+        self.stopped_after_writing = round > 0;
+        // Nothing it calculated was kept.
+        self.last_recalc_cells = 0;
+        if let Some(circular) = circular {
+            self.circular = circular;
         }
     }
 
@@ -1047,6 +1147,48 @@ pub(crate) mod tests {
             });
         }
         assert_eq!(offered, 3);
+    }
+
+    /// A recalculation asked to stop writes nothing, says so, and works again once the request
+    /// is forgotten.
+    #[test]
+    fn a_recalculation_asked_to_stop_writes_nothing() {
+        let mut wb = Workbook::new();
+        let cell = |row: u32, col: u32| CellRef::new(row, col);
+        if let Some(sh) = wb.sheet_mut(0) {
+            sh.set_cell(cell(0, 0), Cell::value(1.0.into()));
+            for row in 0..500 {
+                sh.set_cell(cell(row, 1), Cell::formula(Formula::new(&format!("=$A$1+{row}"))));
+            }
+            sh.set_cell(cell(0, 3), Cell::formula(Formula::new("=SEQUENCE(3)+A1")));
+        }
+        let mut calc = Calc::new();
+        calc.recalc_all(&mut wb);
+        let interrupt = std::sync::Arc::new(super::Interrupt::default());
+        calc.interrupt = Some(std::sync::Arc::clone(&interrupt));
+        let before = wb.clone();
+        if let Some(sh) = wb.sheet_mut(0) {
+            sh.set_cell(cell(0, 0), Cell::value(10.0.into()));
+        }
+        let edited = wb.clone();
+        interrupt.request();
+        calc.cells_changed(&mut wb, &[(0, cell(0, 0))]);
+        assert!(interrupt.was_hit());
+        assert_eq!(calc.last_recalc_cells, 0);
+        assert_eq!(wb, edited, "no value and no spill was written");
+        assert_eq!(wb.sheets[0].value(cell(499, 1)), before.sheets[0].value(cell(499, 1)));
+        // Asked again while nothing is calculated: nothing is hit.
+        interrupt.reset();
+        assert!(!interrupt.was_hit() && !interrupt.is_requested());
+        calc.cells_changed(&mut wb, &[(0, cell(0, 0))]);
+        assert!(!interrupt.was_hit());
+        assert_eq!(wb.sheets[0].value(cell(499, 1)), Value::Number(509.0));
+        assert_eq!(wb.sheets[0].value(cell(2, 3)), Value::Number(13.0));
+        // A full recalculation stops the same way.
+        interrupt.request();
+        let mut again = wb.clone();
+        calc.recalc_all(&mut again);
+        assert!(interrupt.was_hit());
     }
 
     /// A cell read by one formula holds that formula alone, and a set once a second one reads it.

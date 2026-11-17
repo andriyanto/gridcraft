@@ -208,6 +208,10 @@ impl Trial {
 
     /// Sets `sets` to constants, recalculates their dependents and reads `reads`.
     pub(crate) fn run(&mut self, sets: &[(usize, CellRef, Value)], reads: &[(usize, CellRef)]) -> Vec<Value> {
+        // The command was asked to stop: its result is dropped, so the trials left give blanks.
+        if self.calc.interrupt.as_ref().is_some_and(|interrupt| interrupt.was_hit()) {
+            return vec![Value::Empty; reads.len()];
+        }
         let mut wb = self.base.clone();
         let mut keys = Vec::with_capacity(sets.len());
         for (si, c, v) in sets {

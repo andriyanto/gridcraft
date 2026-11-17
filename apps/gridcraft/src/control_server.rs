@@ -72,20 +72,31 @@ fn make_token(port: u16, chosen: Option<String>) -> std::io::Result<String> {
     Ok(token)
 }
 
-pub fn start(port: u16, chosen_token: Option<String>, ctx: egui::Context) -> std::io::Result<Receiver<ControlRequest>> {
+/// `stop` is the session's [`gridcraft_engine::Session::interrupt`]: `engine.cancel` asks it to
+/// stop the command the UI thread is running.
+pub fn start(port: u16, chosen_token: Option<String>, ctx: egui::Context, stop: Stop) -> std::io::Result<Receiver<ControlRequest>> {
     let listener = TcpListener::bind(("127.0.0.1", port))?;
     let token: Arc<str> = make_token(port, chosen_token)?.into();
-    let rx = serve_listener(listener, token, ctx)?;
+    let rx = serve_listener(listener, token, ctx, stop)?;
     log::info!("control channel listening on 127.0.0.1:{port}");
     Ok(rx)
 }
 
 /// Accept connections on `listener`; requests arrive on the returned receiver.
-fn serve_listener(listener: TcpListener, token: Arc<str>, ctx: egui::Context) -> std::io::Result<Receiver<ControlRequest>> {
-    serve_listener_with(listener, token, ctx, AUTH_LIMITS)
+fn serve_listener(listener: TcpListener, token: Arc<str>, ctx: egui::Context, stop: Stop) -> std::io::Result<Receiver<ControlRequest>> {
+    serve_listener_with(listener, token, ctx, stop, AUTH_LIMITS)
 }
 
-fn serve_listener_with(listener: TcpListener, token: Arc<str>, ctx: egui::Context, limits: AuthLimits) -> std::io::Result<Receiver<ControlRequest>> {
+/// What `engine.cancel` asks to stop.
+pub type Stop = Arc<gridcraft_engine::calc::Interrupt>;
+
+fn serve_listener_with(
+    listener: TcpListener,
+    token: Arc<str>,
+    ctx: egui::Context,
+    stop: Stop,
+    limits: AuthLimits,
+) -> std::io::Result<Receiver<ControlRequest>> {
     let (tx, rx) = channel();
     let waiting = Arc::new(AtomicUsize::new(0));
     std::thread::Builder::new().name("control".into()).spawn(move || {
@@ -100,8 +111,10 @@ fn serve_listener_with(listener: TcpListener, token: Arc<str>, ctx: egui::Contex
             let tx = tx.clone();
             let ctx = ctx.clone();
             let token = Arc::clone(&token);
-            let _ =
-                std::thread::Builder::new().name("control-conn".into()).spawn(move || serve(stream, &token, tx, ctx, limits.timeout, Some(place)));
+            let stop = Arc::clone(&stop);
+            let _ = std::thread::Builder::new()
+                .name("control-conn".into())
+                .spawn(move || serve(stream, &token, tx, ctx, &stop, limits.timeout, Some(place)));
         }
     })?;
     Ok(rx)
@@ -219,7 +232,15 @@ fn is_http_request_line(text: &str) -> bool {
         || text.rsplit_once(' ').is_some_and(|(_, version)| version.starts_with("HTTP/"))
 }
 
-fn serve(stream: TcpStream, token: &str, tx: Sender<ControlRequest>, ctx: egui::Context, auth_timeout: Duration, place: Option<Pending>) {
+fn serve(
+    stream: TcpStream,
+    token: &str,
+    tx: Sender<ControlRequest>,
+    ctx: egui::Context,
+    stop: &gridcraft_engine::calc::Interrupt,
+    auth_timeout: Duration,
+    place: Option<Pending>,
+) {
     let Ok(read) = stream.try_clone() else { return };
     let mut out = stream;
     let mut reader = BufReader::new(read);
@@ -239,6 +260,15 @@ fn serve(stream: TcpStream, token: &str, tx: Sender<ControlRequest>, ctx: egui::
             Ok(true) => match parse_line(&buf) {
                 Line::Blank => continue,
                 Line::Reject(e) => e,
+                // Answered here: the UI thread, which answers the rest, is the one running the
+                // command to stop, and reads its queue again only when that command is over.
+                Line::Request { id, method, .. } if method == "engine.cancel" => {
+                    stop.request();
+                    if writeln!(out, "{}", json!({"id": id, "ok": true, "result": {"requested": true}})).is_err() {
+                        break;
+                    }
+                    continue;
+                }
                 Line::Request { id, method, params } => {
                     let (req, rx) = ControlRequest::new(method, params);
                     let state = std::sync::Arc::clone(&req.state);
@@ -298,7 +328,7 @@ mod tests {
     fn serve_on_loopback() -> (std::net::SocketAddr, Receiver<ControlRequest>) {
         let listener = TcpListener::bind(("127.0.0.1", 0)).unwrap();
         let addr = listener.local_addr().unwrap();
-        (addr, serve_listener(listener, TOKEN.into(), egui::Context::default()).unwrap())
+        (addr, serve_listener(listener, TOKEN.into(), egui::Context::default(), Stop::default()).unwrap())
     }
 
     /// A browser can POST to the port: its request line closes the connection before the JSON
@@ -368,7 +398,7 @@ mod tests {
         std::thread::spawn(move || {
             for stream in listener.incoming().flatten() {
                 let tx = tx.clone();
-                std::thread::spawn(move || serve(stream, TOKEN, tx, egui::Context::default(), AUTH_TIMEOUT, None));
+                std::thread::spawn(move || serve(stream, TOKEN, tx, egui::Context::default(), &Stop::default(), AUTH_TIMEOUT, None));
             }
         });
         addr
@@ -380,6 +410,40 @@ mod tests {
         c.write_all(send.as_bytes()).unwrap();
         // Replies up to the server closing the connection.
         BufReader::new(c).lines().map_while(Result::ok).map(|l| serde_json::from_str(&l).unwrap()).collect()
+    }
+
+    /// `engine.cancel` is answered by the connection's own thread: the UI thread, which answers
+    /// everything else, is busy with the command to stop.
+    #[test]
+    fn cancel_is_answered_without_the_ui_thread() {
+        let listener = TcpListener::bind(("127.0.0.1", 0)).unwrap();
+        let addr = listener.local_addr().unwrap();
+        let stop = Stop::default();
+        // A UI that never answers: its queue is only kept open.
+        let (tx, rx) = channel::<ControlRequest>();
+        {
+            let stop = Arc::clone(&stop);
+            std::thread::spawn(move || {
+                for stream in listener.incoming().flatten() {
+                    let (tx, stop) = (tx.clone(), Arc::clone(&stop));
+                    std::thread::spawn(move || serve(stream, TOKEN, tx, egui::Context::default(), &stop, AUTH_TIMEOUT, None));
+                }
+            });
+        }
+        let mut c = TcpStream::connect(addr).unwrap();
+        c.set_read_timeout(Some(Duration::from_secs(5))).unwrap();
+        c.write_all(format!("{}\n", control_auth::auth_line(1, TOKEN)).as_bytes()).unwrap();
+        let mut r = BufReader::new(c.try_clone().unwrap());
+        let mut line = String::new();
+        r.read_line(&mut line).unwrap();
+        assert!(!stop.is_requested(), "authenticating asks for nothing");
+        c.write_all(b"{\"id\":7,\"method\":\"engine.cancel\"}\n").unwrap();
+        line.clear();
+        r.read_line(&mut line).unwrap();
+        let v: Json = serde_json::from_str(&line).unwrap();
+        assert_eq!((v["id"].clone(), v["ok"].clone(), v["result"]["requested"].clone()), (json!(7), json!(true), json!(true)));
+        assert!(stop.is_requested());
+        assert!(rx.try_recv().is_err(), "nothing was queued for the UI thread");
     }
 
     #[test]
@@ -446,7 +510,7 @@ mod tests {
         let listener = TcpListener::bind(("127.0.0.1", 0)).unwrap();
         let addr = listener.local_addr().unwrap();
         let limits = AuthLimits { timeout: Duration::from_millis(300), max_pending: MAX_PENDING_AUTH };
-        let _rx = serve_listener_with(listener, TOKEN.into(), egui::Context::default(), limits).unwrap();
+        let _rx = serve_listener_with(listener, TOKEN.into(), egui::Context::default(), Stop::default(), limits).unwrap();
 
         let silent = TcpStream::connect(addr).unwrap();
         let mut slow = TcpStream::connect(addr).unwrap();
@@ -473,7 +537,7 @@ mod tests {
         let listener = TcpListener::bind(("127.0.0.1", 0)).unwrap();
         let addr = listener.local_addr().unwrap();
         let limits = AuthLimits { timeout: Duration::from_secs(20), max_pending: 2 };
-        let _rx = serve_listener_with(listener, TOKEN.into(), egui::Context::default(), limits).unwrap();
+        let _rx = serve_listener_with(listener, TOKEN.into(), egui::Context::default(), Stop::default(), limits).unwrap();
 
         let mut first = TcpStream::connect(addr).unwrap();
         let _second = TcpStream::connect(addr).unwrap();

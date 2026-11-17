@@ -404,6 +404,10 @@ pub(crate) fn commit<R>(d: &mut DocState, f: impl FnOnce(&mut Ctx) -> Result<R>)
     // reads the wall clock without the (disallowed) `now`.
     let t0 = if cfg!(target_arch = "wasm32") { None } else { std::env::var_os("GRIDCRAFT_PROFILE").map(|_| wall_clock()) };
     let since = |t0: std::time::Duration| wall_clock().saturating_sub(t0);
+    // A command that was stopped stays stopped: an edit it still makes is dropped anyway.
+    if d.calc.interrupt.as_ref().is_some_and(|interrupt| interrupt.was_hit()) {
+        return Err(EngineError::Cancelled);
+    }
     let mut sel = d.selection.clone();
     let mut ctx = Ctx {
         wb: (*d.wb).clone(),
@@ -458,6 +462,9 @@ pub(crate) fn commit<R>(d: &mut DocState, f: impl FnOnce(&mut Ctx) -> Result<R>)
     } else if !changed.is_empty() {
         d.calc.cells_changed(&mut wb, &changed);
     }
+    // In manual mode hiding rows recalculates everything.
+    let graph_kept = !structural && !(rows_shown_or_hidden && wb.calc.mode == gridcraft_model::CalcMode::Manual);
+    stopped(d, graph_kept.then_some(changed.as_slice()))?;
     controls::sync_linked_values(&mut wb);
     if let Some(t0) = t0 {
         eprintln!("commit: + recalc {:?}", since(t0));
@@ -473,6 +480,18 @@ pub(crate) fn commit<R>(d: &mut DocState, f: impl FnOnce(&mut Ctx) -> Result<R>)
     d.wb = std::sync::Arc::new(wb);
     d.selection = sel;
     Ok(r)
+}
+
+/// After a recalculation of a copy of `d`'s workbook: when it was asked to stop
+/// ([`Session::interrupt`](crate::Session::interrupt)), the copy is partly calculated and the
+/// caller drops it by returning this error. The graph was updated for the copy, so it is put
+/// back for the workbook `d` keeps: `changed` as for `Calc::restore_after_stop`.
+pub(crate) fn stopped(d: &mut DocState, changed: Option<&[gridcraft_calc::Key]>) -> Result<()> {
+    if d.calc.interrupt.as_ref().is_some_and(|interrupt| interrupt.was_hit()) {
+        d.calc.restore_after_stop(&d.wb, changed);
+        return Err(EngineError::Cancelled);
+    }
+    Ok(())
 }
 
 /// "Set precision as displayed": a number typed, pasted or reformatted is stored as its format

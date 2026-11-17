@@ -2977,3 +2977,111 @@ fn a_name_that_refers_to_itself_is_a_circular_reference() {
     t.set("B1", "=Gama");
     assert_eq!(t.num("B1"), 6.0);
 }
+
+mod other_workbooks {
+    //! Formulas that read another workbook's cells (`docs/external-references.md`): they are
+    //! evaluated from what this workbook keeps of them, never from the other workbook.
+
+    use std::sync::Arc;
+
+    use super::*;
+    use gridcraft_model::ExternalLink;
+
+    /// A workbook that keeps, of `Budget.xlsx`, Sheet1!A1:A3 = 10, 20, 30 and B2 = "x".
+    fn linked() -> T {
+        let mut t = T::new();
+        let mut link = ExternalLink::named("Budget.xlsx");
+        for (at, v) in [("A1", 10.0), ("A2", 20.0), ("A3", 30.0)] {
+            link.set("Sheet1", c(at), Value::Number(v));
+        }
+        link.set("Sheet1", c("B2"), Value::text("x"));
+        link.set("Empty", c("A1"), Value::Number(1.0));
+        t.wb.links.push(Arc::new(link));
+        t
+    }
+
+    #[test]
+    fn a_cell_and_a_block_of_another_workbook_come_from_the_kept_values() {
+        let mut t = linked();
+        t.set("D1", "=[Budget.xlsx]Sheet1!A2*2");
+        assert_eq!(t.num("D1"), 40.0);
+        t.set("D2", "=SUM([budget.XLSX]sheet1!A1:A3)");
+        assert_eq!(t.num("D2"), 60.0, "names match without regard to case");
+        t.set("D3", "=[Budget.xlsx]Sheet1!B2&\"!\"");
+        assert_eq!(t.get("D3"), Value::text("x!"));
+        // A cell nothing is kept of is blank, as an empty cell is.
+        t.set("D4", "=[Budget.xlsx]Sheet1!Z99+1");
+        assert_eq!(t.num("D4"), 1.0);
+        // A block keeps its shape, blanks included; a whole column ends where the kept values do.
+        t.set("D5", "=ROWS([Budget.xlsx]Sheet1!A1:B10)*100+COLUMNS([Budget.xlsx]Sheet1!A1:B10)");
+        assert_eq!(t.num("D5"), 1002.0);
+        t.set("D6", "=ROWS([Budget.xlsx]Sheet1!A:A)");
+        assert_eq!(t.num("D6"), 3.0);
+        t.set("D7", "=COUNTA([Budget.xlsx]Sheet1!A:B)");
+        assert_eq!(t.num("D7"), 4.0);
+        t.set("D8", "=INDEX([Budget.xlsx]Sheet1!A1:B3,2,2)");
+        assert_eq!(t.get("D8"), Value::text("x"));
+    }
+
+    #[test]
+    fn a_sheet_the_link_does_not_have_is_a_ref_error() {
+        let mut t = linked();
+        t.set("D1", "=[Budget.xlsx]Nowhere!A1");
+        assert_eq!(t.get("D1"), Value::Error(CellError::Ref));
+        t.set("D2", "=IFERROR([Budget.xlsx]Nowhere!A1,7)");
+        assert_eq!(t.num("D2"), 7.0);
+    }
+
+    /// The other workbook's cells are no cells of this one: a formula that reads them is
+    /// calculated again whenever the workbook is, so new kept values show at once.
+    #[test]
+    fn new_kept_values_show_at_the_next_recalculation_with_what_depends_on_them() {
+        let mut t = linked();
+        t.set("D1", "=[Budget.xlsx]Sheet1!A1");
+        t.set("E1", "=D1+1");
+        assert_eq!(t.num("E1"), 11.0);
+        Arc::make_mut(&mut t.wb.links[0]).set("Sheet1", c("A1"), Value::Number(500.0));
+        t.calc.cells_changed(&mut t.wb, &[]);
+        assert_eq!((t.num("D1"), t.num("E1")), (500.0, 501.0));
+        // A full recalculation and a graph built from the workbook agree.
+        let mut fresh = t.wb.clone();
+        Calc::new().recalc_all(&mut fresh);
+        assert_eq!(fresh.sheet(0).unwrap().value(c("E1")), Value::Number(501.0));
+    }
+
+    /// A file's formulas into other workbooks arrive with the values the file saved and no
+    /// link: nothing is known of those workbooks' cells. Such a cell keeps its value through
+    /// every recalculation, instead of turning into `#REF!` at the first one.
+    #[test]
+    fn a_formula_into_a_workbook_without_a_link_keeps_the_value_it_has() {
+        let mut t = T::new();
+        t.wb.sheet_mut(0).unwrap().cells.set(c("A1"), Cell { value: Value::Number(42.0), ..Cell::formula(Formula::new("=[1]Sheet1!B4*2")) });
+        t.set("B1", "=A1+1");
+        assert_eq!((t.num("A1"), t.num("B1")), (42.0, 43.0));
+        t.set("C1", "5");
+        t.calc.recalc_all(&mut t.wb);
+        assert_eq!((t.num("A1"), t.num("B1")), (42.0, 43.0), "after a full recalculation too");
+        // A formula of this workbook inside the same cell is still calculated.
+        t.wb.sheet_mut(0)
+            .unwrap()
+            .cells
+            .set(c("A2"), Cell { value: Value::Number(1.0), ..Cell::formula(Formula::new("=C1+IFERROR([1]Sheet1!B4,0)")) });
+        t.calc.cells_changed(&mut t.wb, &[(0, c("A2"))]);
+        assert_eq!(t.num("A2"), 1.0, "what it reads of the other workbook is unknown, so its value stays");
+        // Once the link is there, the kept values count.
+        let mut link = ExternalLink::named("1");
+        link.set("Sheet1", c("B4"), Value::Number(8.0));
+        t.wb.links.push(Arc::new(link));
+        t.calc.cells_changed(&mut t.wb, &[]);
+        assert_eq!((t.num("A1"), t.num("B1"), t.num("A2")), (16.0, 17.0, 13.0));
+    }
+
+    #[test]
+    fn where_a_reference_is_needed_another_workbook_s_cells_are_none() {
+        let mut t = linked();
+        t.set("D1", "=ROW([Budget.xlsx]Sheet1!A2)");
+        assert!(matches!(t.get("D1"), Value::Error(_)), "{:?}", t.get("D1"));
+        t.set("D2", "=SUM(OFFSET([Budget.xlsx]Sheet1!A1,1,0))");
+        assert!(matches!(t.get("D2"), Value::Error(_)), "{:?}", t.get("D2"));
+    }
+}

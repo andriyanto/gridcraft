@@ -108,6 +108,11 @@ pub trait Host {
     fn random(&mut self) -> f64;
     /// Called when a volatile or dynamic-reference function is used.
     fn note_volatile(&mut self) {}
+    /// Called when the formula reads a workbook this one has no link to
+    /// (`gridcraft_model::links`): nothing is known of its cells, so the formula has no value to
+    /// give. A recalculation leaves such a cell with the value it has, which is how a file's
+    /// formulas into other workbooks keep the values the file saved.
+    fn note_unlinked(&mut self) {}
     /// The spill range of the dynamic array anchored at `anchor` (`None`: it doesn't spill).
     fn spill_range(&mut self, sheet: usize, anchor: CellRef) -> Option<RangeRef> {
         self.workbook().sheet(sheet)?.spill_ranges.get(&anchor).copied()
@@ -270,7 +275,48 @@ impl<'h> Evaluator<'h> {
                 let (i, j) = (wb.sheet_index(a).ok_or(CellError::Ref)?, wb.sheet_index(b).ok_or(CellError::Ref)?);
                 Ok((i.min(j)..=i.max(j)).collect())
             }
+            // No sheet of this workbook: where a reference is needed (OFFSET's base, ROW's
+            // argument) there is none to give. Its values are read by `external_value`.
+            SheetSel::External(_) => Err(CellError::Ref),
         }
+    }
+
+    /// The values a reference into another workbook stands for: what this workbook keeps of
+    /// that workbook's cells (`Workbook::links`), never the other workbook itself.
+    ///
+    /// One cell gives its value, blank when none is kept. A block gives an array of its own
+    /// shape while it is small enough to keep it ([`keeps_full_size`]); a larger one, or one
+    /// that runs to the sheet's edge (`[Book2]Data!A:A`), is cut down to where its kept values
+    /// end, as such a block of this workbook is. `#REF!` when the link has no such sheet, and
+    /// when the workbook has no such link (the host is told: [`Host::note_unlinked`]); `#NUM!`
+    /// for an array over `MAX_CELLS`.
+    fn external_value(&mut self, book: &str, sheet: &str, range: RangeRef) -> Value {
+        let Some(link) = gridcraft_model::links::find(&self.host.workbook().links, book) else {
+            self.host.note_unlinked();
+            return Value::Error(CellError::Ref);
+        };
+        let Some(kept) = link.sheet(sheet) else { return Value::Error(CellError::Ref) };
+        if range.is_single() {
+            return kept.value(range.start);
+        }
+        let range = if keeps_full_size(&range) {
+            range
+        } else {
+            let end = kept.filled_end(range).unwrap_or(range.start);
+            RangeRef::new(range.start, CellRef::new(end.row.max(range.start.row), end.col.max(range.start.col)))
+        };
+        let (h, w) = (range.height() as usize, range.width() as usize);
+        if (h as u64) * (w as u64) > MAX_CELLS {
+            return Value::Error(CellError::Num);
+        }
+        let mut data = vec![Value::Empty; h * w];
+        for (cell, value) in kept.cells_in(range) {
+            let at = (cell.row - range.start.row) as usize * w + (cell.col - range.start.col) as usize;
+            if let Some(slot) = data.get_mut(at) {
+                *slot = value.clone();
+            }
+        }
+        Array::new(h, w, data).map(Value::from).unwrap_or(Value::Error(CellError::Value))
     }
 
     pub fn reference_areas(&self, r: &Reference) -> Result<Vec<Area>, CellError> {
@@ -379,9 +425,12 @@ impl<'h> Evaluator<'h> {
                 }
                 Ev::V(Array::new(h, w, data).map(Value::from).unwrap_or(Value::Error(CellError::Value)))
             }
-            Expr::Ref(r) => match self.reference_areas(r) {
-                Ok(a) => Ev::R(a),
-                Err(x) => err(x),
+            Expr::Ref(r) => match r.sheet.as_external() {
+                Some((book, sheet)) => Ev::V(self.external_value(book, sheet, r.range())),
+                None => match self.reference_areas(r) {
+                    Ok(a) => Ev::R(a),
+                    Err(x) => err(x),
+                },
             },
             Expr::Name(n) => self.name(n),
             Expr::Struct(s) => self.structured(s),

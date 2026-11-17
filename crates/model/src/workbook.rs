@@ -256,6 +256,10 @@ pub struct Workbook {
     /// Never written.
     #[serde(rename = "macros", default, skip_serializing, deserialize_with = "crate::macros::entries")]
     pub macros_read: Vec<serde_json::Value>,
+    /// The other workbooks this one's formulas read cells of, each with the values read
+    /// ([`crate::links`]).
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub links: crate::links::Links,
     /// Macros in a newer format than this build reads, as the file held them. They are never read,
     /// listed or run; a save writes them back unchanged, so the newer build gets them back whole.
     /// Shared between snapshots, as nothing changes them.
@@ -367,6 +371,7 @@ impl Workbook {
             csv_delimiter: None,
             macros: crate::macros::Macros::default(),
             macros_read: vec![],
+            links: Vec::new(),
             macros_unread: Arc::default(),
             preserved: None,
             source_dir: None,

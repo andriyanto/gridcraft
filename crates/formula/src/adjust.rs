@@ -100,7 +100,8 @@ fn on_target(r: &Reference, host: &str, target: &str) -> bool {
     match &r.sheet {
         SheetSel::Current => host.eq_ignore_ascii_case(target),
         SheetSel::Named(n) => n.eq_ignore_ascii_case(target),
-        SheetSel::Span(..) => false,
+        // Another workbook's cells are where they were, whatever moves in this one.
+        SheetSel::Span(..) | SheetSel::External(..) => false,
     }
 }
 

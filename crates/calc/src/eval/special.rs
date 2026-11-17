@@ -47,8 +47,14 @@ pub fn precedents(wb: &Workbook, sheet: usize, e: &Expr) -> (Vec<Area>, bool) {
                 }
             }
         }
+        // Cells of another workbook are no cells of this one: see `dynamic` below.
+        SheetSel::External(_) => {}
     };
     e.walk(&mut |x| match x {
+        // What this workbook keeps of another workbook's cells changes without a cell of this
+        // one changing: a formula that reads it is calculated every time, as one whose
+        // references are only known while it evaluates.
+        Expr::Ref(r) if r.sheet.as_external().is_some() => dynamic = true,
         Expr::Ref(r) => push(&mut out, r, r.range()),
         // The cells SUMIF/AVERAGEIF really read from the sum range (see `resized_sum_range`); when
         // the criteria range's size isn't known statically, recalculate the formula every time.

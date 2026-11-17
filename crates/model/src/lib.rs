@@ -8,6 +8,7 @@ mod b64;
 pub mod cell;
 mod cellmap;
 pub mod features;
+pub mod links;
 pub mod macros;
 pub mod password;
 pub mod preserved;
@@ -19,6 +20,7 @@ pub mod workbook;
 
 pub use cell::{Cell, CellPicture, Formula};
 pub use features::*;
+pub use links::{ExternalLink, LinkSheet, Links};
 pub use macros::*;
 pub use password::PasswordHash;
 pub use preserved::{Preserved, PreservedPart, PreservedRel, PreservedSheet, PreservedXml};

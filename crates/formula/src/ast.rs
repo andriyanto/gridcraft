@@ -38,12 +38,45 @@ pub enum SheetSel {
     /// 3-D span `Sheet1:Sheet3` (first, last). Boxed: every reference of every formula holds a
     /// `SheetSel`, and two names held inline made each of them 24 bytes larger for a form few use.
     Span(Box<(String, String)>),
+    /// A sheet of another workbook, `[Budget.xlsx]Sheet1` (workbook, sheet). The workbook is the
+    /// name between the brackets as the formula has it: the source's file name, its title while
+    /// it has no file, or the link's number as a file writes it (`[1]`). Boxed as `Span` is.
+    External(Box<(String, String)>),
 }
 
 impl SheetSel {
     /// The 3-D span `first:last`.
     pub fn span(first: String, last: String) -> SheetSel {
         SheetSel::Span(Box::new((first, last)))
+    }
+
+    /// The sheet `sheet` of the workbook `book`.
+    pub fn external(book: String, sheet: String) -> SheetSel {
+        SheetSel::External(Box::new((book, sheet)))
+    }
+
+    /// The workbook and sheet of a reference into another workbook.
+    pub fn as_external(&self) -> Option<(&str, &str)> {
+        match self {
+            SheetSel::External(x) => Some((x.0.as_str(), x.1.as_str())),
+            _ => None,
+        }
+    }
+
+    /// Reads a sheet prefix's name as `[workbook]sheet`. `None`: an ordinary sheet name.
+    /// `Some(Err)`: it starts as a workbook's name does and isn't one this build reads.
+    pub fn parse_external(name: &str) -> Option<Result<SheetSel, &'static str>> {
+        let rest = name.strip_prefix('[')?;
+        let Some((book, sheet)) = rest.split_once(']') else { return Some(Err("the workbook's name has no closing ]")) };
+        Some(if book.is_empty() {
+            Err("there is no workbook name between [ and ]")
+        } else if sheet.is_empty() {
+            Err("a name of another workbook can't be used here: give a sheet and a cell")
+        } else if sheet.contains(['[', ']', ':']) {
+            Err("a reference to another workbook names one sheet")
+        } else {
+            Ok(SheetSel::external(book.to_string(), sheet.to_string()))
+        })
     }
 }
 

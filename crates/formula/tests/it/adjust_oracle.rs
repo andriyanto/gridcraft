@@ -58,7 +58,7 @@ mod old {
                 let on_target = match &r.sheet {
                     SheetSel::Current => host.eq_ignore_ascii_case(target),
                     SheetSel::Named(n) => n.eq_ignore_ascii_case(target),
-                    SheetSel::Span(..) => false,
+                    SheetSel::Span(..) | SheetSel::External(..) => false,
                 };
                 if !on_target {
                     return Expr::Ref(r);

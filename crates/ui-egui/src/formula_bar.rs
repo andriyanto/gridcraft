@@ -487,9 +487,22 @@ pub fn editor_widget(app: &mut SheetApp, ui: &mut egui::Ui, id: egui::Id, font: 
         return python_editor(app, ui, id, width, max_height);
     }
     let Some(mut ed) = app.editor.take() else { return EditorInfo::default() };
-    let mine = ed.from_formula_bar == (id == egui::Id::unique("gridcraft.formula_bar"));
+    let (bar, in_cell) = (egui::Id::unique("gridcraft.formula_bar"), egui::Id::unique("gridcraft.cell_editor"));
+    let is_bar = id == bar;
+    // An edit that began in the cell has its keys in the in-cell editor, which is drawn on the
+    // draft's own sheet only. While another sheet is shown (a formula pointing at it) the bar is
+    // the one editor there is and stands in for it. The edit stays a cell's edit: its arrow keys
+    // still point, and back on its sheet the in-cell editor has it again.
+    let stands_in = is_bar && !ed.from_formula_bar && cell_editor_out_of_sight(app, &ed);
+    let mine = ed.from_formula_bar == is_bar || stands_in;
     // Keys the editor handles itself (before the TextEdit sees them), only where it has focus.
     let focused = ui.ctx().memory(|m| m.focused());
+    // The keyboard goes with the draft between the two: to the bar from the in-cell editor that
+    // is no longer drawn, and back to the in-cell editor from a bar that only stood in.
+    let left_behind = if stands_in { focused.is_none_or(|f| f == in_cell) } else { !is_bar && focused == Some(bar) };
+    if mine && !ed.from_formula_bar && left_behind {
+        ed.request_focus = true;
+    }
     let has_focus = focused == Some(id) || (mine && (ed.request_focus || focused.is_none()));
     let EditorKeyOutcome { action, arrow, cancel, to_python } = editor_shortcuts(app, ui, id, &mut ed, mine, has_focus);
     // The text widget.
@@ -634,6 +647,15 @@ pub fn editor_widget(app: &mut SheetApp, ui: &mut egui::Ui, id: egui::Id, font: 
         app.commit_edit_from_keys(dr, dc, array, fill, arrow);
     }
     EditorInfo { lines, caret }
+}
+
+/// Whether the draft's workbook is shown, in the draft's window, on another sheet than the
+/// draft's: a formula that points at that sheet. The in-cell editor is drawn on the draft's own
+/// sheet only, and an edit that began in the cell has its keys there, so on the other sheet
+/// nothing took them: Enter, Esc and typing did nothing until the formula bar was clicked.
+fn cell_editor_out_of_sight(app: &SheetApp, ed: &crate::editor::EditState) -> bool {
+    let here = ed.window.is_none_or(|w| app.session.active_window() == Some(w));
+    here && app.session.active().is_some_and(|d| d.uid == ed.doc && d.wb.active_sheet() != ed.sheet)
 }
 
 type EditorAction = (i64, i64, bool, bool);

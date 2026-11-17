@@ -33,6 +33,11 @@ fn edge_sheet(sheets: &[Arc<Sheet>], last: bool) -> Option<usize> {
 fn activate_sheet(app: &mut SheetApp, i: usize) {
     if app.editor.as_ref().is_some_and(|e| e.can_point()) {
         let _ = app.engine("sheet.activate", json!({"sheet": i}));
+        // The click took the keyboard to the tab strip: the formula has it back, in the editor
+        // shown with that sheet, so Enter, Esc and typing go on.
+        if let Some(ed) = app.editor.as_mut() {
+            ed.request_focus = true;
+        }
     } else {
         if app.editor.is_some() && !app.commit_edit(0, 0, false, false) {
             return;

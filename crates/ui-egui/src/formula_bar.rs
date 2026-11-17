@@ -631,11 +631,7 @@ pub fn editor_widget(app: &mut SheetApp, ui: &mut egui::Ui, id: egui::Id, font: 
     if cancel {
         app.cancel_edit();
     } else if let Some((dr, dc, array, fill)) = action {
-        if arrow {
-            app.commit_edit_arrow(dr, dc);
-        } else {
-            app.commit_edit(dr, dc, array, fill);
-        }
+        app.commit_edit_from_keys(dr, dc, array, fill, arrow);
     }
     EditorInfo { lines, caret }
 }

@@ -298,6 +298,34 @@ fn trim_to_budget(history: &mut Vec<HistoryEntry>, byte_budget: usize) {
 }
 
 impl DocState {
+    /// This document without its dependency graph, for [`Session::stand_in`]: the loops it lists
+    /// and the count of the last recalculation are kept, for the status bar.
+    fn without_graph(&self) -> DocState {
+        let mut calc = Calc::new();
+        calc.circular = self.calc.circular.clone();
+        calc.last_recalc_cells = self.calc.last_recalc_cells;
+        DocState {
+            wb: self.wb.clone(),
+            calc,
+            selection: self.selection.clone(),
+            undo: self.undo.clone(),
+            redo: self.redo.clone(),
+            path: self.path.clone(),
+            saved: self.saved.clone(),
+            revision: self.revision,
+            uid: self.uid,
+            title: self.title.clone(),
+            sheet_selections: self.sheet_selections.clone(),
+            unlocked_ranges: self.unlocked_ranges.clone(),
+            content_kind: self.content_kind,
+            scripts_trusted: self.scripts_trusted,
+            trust: self.trust,
+            touched: None,
+            edits: None,
+            go_to_recent: self.go_to_recent.clone(),
+        }
+    }
+
     /// A document for `wb`, which came from where `trust` says: [`Trust::FromFile`] for anything
     /// read from bytes (a file, a download, a recovery copy), [`Trust::Local`] only for a workbook
     /// made in this session.
@@ -558,6 +586,71 @@ impl Session {
     /// formula. A request made while no command runs is forgotten when the next one starts.
     pub fn interrupt(&self) -> Arc<gridcraft_calc::Interrupt> {
         self.interrupt.clone()
+    }
+    /// A copy of this session to read from while the session itself is away running a command
+    /// on another thread ([`Session::interrupt`] stops that command): the same workbooks, windows,
+    /// selections, histories, clipboard and settings, as they are now.
+    ///
+    /// It is for reading. It has no dependency graph (its workbooks' formulas keep the values
+    /// they have and are not recalculated by an edit), no journal, and an interrupt handle of
+    /// its own, so a query run on it does not forget a request made to the real one. Whatever is
+    /// changed in it is lost when it is dropped.
+    ///
+    /// `None` while a macro is being debugged: the debugger's run can't be copied.
+    pub fn stand_in(&self) -> Option<Session> {
+        if self.macro_debug.is_some() {
+            return None;
+        }
+        Some(Session {
+            docs: self.docs.iter().map(DocState::without_graph).collect(),
+            active: self.active,
+            windows: self.windows.clone(),
+            active_window: self.active_window,
+            next_window: self.next_window,
+            activation: self.activation,
+            clipboard: self.clipboard.clone(),
+            prefs: self.prefs.clone(),
+            mode: self.mode,
+            journal: Vec::new(),
+            journal_sizes: Vec::new(),
+            journal_bytes: 0,
+            journal_paused: 0,
+            ui_requests: Vec::new(),
+            format_painter: self.format_painter.clone(),
+            last_find: self.last_find.clone(),
+            hide_ruler: self.hide_ruler,
+            recording: self.recording,
+            recorder: self.recorder.clone(),
+            depth: 0,
+            script_ran: None,
+            macro_approvals: self.macro_approvals.clone(),
+            macro_debug: None,
+            macro_recording: self.macro_recording.clone(),
+            draw_tool: self.draw_tool.clone(),
+            draw_color: self.draw_color.clone(),
+            draw_width: self.draw_width,
+            comments_pane: self.comments_pane,
+            show_all_notes: self.show_all_notes,
+            link_policy: self.link_policy,
+            groups: Vec::new(),
+            next_group: self.next_group,
+            group_epoch: self.group_epoch,
+            group_step: None,
+            marks: Vec::new(),
+            text_width: self.text_width.clone(),
+            interrupt: Arc::default(),
+        })
+    }
+    /// Makes a [`Session::stand_in`] a session to work in, when the session it stood in for is
+    /// lost with the thread that held it: its workbooks get their dependency graphs, and it
+    /// listens to `interrupt`, the lost session's handle, which others may still hold. The
+    /// command that was running, and the journal, are gone.
+    pub fn adopt(&mut self, interrupt: Arc<gridcraft_calc::Interrupt>) {
+        self.interrupt = interrupt;
+        for d in self.docs.iter_mut() {
+            d.calc = Calc::new();
+            d.calc.rebuild(&d.wb);
+        }
     }
     pub fn documents(&self) -> &[DocState] {
         &self.docs

@@ -364,7 +364,7 @@ pub fn open_dialog(app: &mut SheetApp, params: &Json) -> Dialog {
     let name = params["name"].as_str().map(str::to_string).or(first).or_else(|| names.first().map(|m| m.0.clone())).unwrap_or_default();
     let doc = app.session.active().map_or(0, |d| d.uid);
     let mut d = Dialog::custom("macros", "Macros", json!({"name": name, "kind": "macro", "doc": doc}));
-    d.result = app.session.run("view.macros", json!({})).ok();
+    d.result = app.engine("view.macros", json!({})).ok();
     d
 }
 
@@ -381,7 +381,7 @@ pub fn macros_dialog(app: &mut SheetApp, ui: &mut Ui, d: &mut Dialog, open: &mut
     // Scripts can change while the dialog is open (Delete): read them again when the workbook does.
     let rev = app.session.active().map(|doc| doc.revision).unwrap_or(0);
     if d.values.get("revision").and_then(Json::as_u64) != Some(rev) {
-        d.result = app.session.run("view.macros", json!({})).ok();
+        d.result = app.engine("view.macros", json!({})).ok();
         d.values.insert("revision".into(), json!(rev));
     }
     if d.values.get("options").and_then(Json::as_bool) == Some(true) {
@@ -399,7 +399,7 @@ pub fn macros_dialog(app: &mut SheetApp, ui: &mut Ui, d: &mut Dialog, open: &mut
             ui.weak("Scripts in this workbook came from a file and are disabled.");
             if ui.button("Trust Scripts").on_hover_text("Let this workbook's scripts run for the rest of this session").clicked() {
                 let _ = app.run("automate.trustScripts", json!({"trusted": true}));
-                d.result = app.session.run("view.macros", json!({})).ok();
+                d.result = app.engine("view.macros", json!({})).ok();
             }
         });
         ui.add_space(6.0);

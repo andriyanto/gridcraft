@@ -2,6 +2,13 @@ use super::geo::Geo;
 use super::menus::is_checkbox;
 use super::{CellRef, Drag, Sheet, SheetApp, json};
 
+/// The next of this frame's events, unless a key before it started a command that is still
+/// running in the background: what was typed behind that key in the same frame is left out, as
+/// keys are until the command is over.
+fn next_event(app: &SheetApp, events: &mut impl Iterator<Item = egui::Event>) -> Option<egui::Event> {
+    if app.is_busy() { None } else { events.next() }
+}
+
 /// Grid keyboard handling when no text field has focus.
 pub(super) fn keyboard(app: &mut SheetApp, ctx: &egui::Context, resp: &egui::Response, geo: &Geo, sh: &Sheet) {
     // Focus left on an editor that no longer exists goes back to the grid.
@@ -42,7 +49,8 @@ pub(super) fn keyboard(app: &mut SheetApp, ctx: &egui::Context, resp: &egui::Res
     // Alt shortcuts type their character too on Windows and Linux (Alt+= sends Text("=")): once
     // a shortcut ran, that text must not start an edit over what it just did.
     let mut shortcut_ran = false;
-    for ev in events {
+    let mut events = events.into_iter();
+    while let Some(ev) = next_event(app, &mut events) {
         match ev {
             egui::Event::Copy => {
                 app.copy_to_clipboard(ctx, "edit.copy");
@@ -75,7 +83,7 @@ pub(super) fn keyboard(app: &mut SheetApp, ctx: &egui::Context, resp: &egui::Res
                 let shift = m.shift;
                 let mv = |app: &mut SheetApp, dr: i64, dc: i64| {
                     let from = app.session.active().map(|d| if shift { d.selection.moving_end() } else { d.selection.active });
-                    let _ = app.session.run("selection.move", json!({"dr": dr, "dc": dc, "extend": shift, "jump": cmd}));
+                    let _ = app.engine("selection.move", json!({"dr": dr, "dc": dc, "extend": shift, "jump": cmd}));
                     app.grid.ensure_visible = true;
                     app.grid.reveal_moving_end = shift;
                     app.grid.reveal_from = from;
@@ -93,17 +101,17 @@ pub(super) fn keyboard(app: &mut SheetApp, ctx: &egui::Context, resp: &egui::Res
                     Key::Home if cmd => {
                         let r = sh.freeze.map(|f| f.0).unwrap_or(0);
                         let c = sh.freeze.map(|f| f.1).unwrap_or(0);
-                        let _ = app.session.run("selection.set", json!({"cell": CellRef::new(r, c).a1()}));
+                        let _ = app.engine("selection.set", json!({"cell": CellRef::new(r, c).a1()}));
                         app.grid.ensure_visible = true;
                     }
                     Key::End if cmd => {
                         let end = sh.used_range().map(|u| u.end).unwrap_or_default();
-                        let _ = app.session.run("selection.set", json!({"cell": end.a1()}));
+                        let _ = app.engine("selection.set", json!({"cell": end.a1()}));
                         app.grid.ensure_visible = true;
                     }
                     Key::Home => {
                         let a = app.session.active().map(|d| d.selection.active).unwrap_or_default();
-                        let _ = app.session.run("selection.set", json!({"cell": CellRef::new(a.row, 0).a1()}));
+                        let _ = app.engine("selection.set", json!({"cell": CellRef::new(a.row, 0).a1()}));
                         app.grid.ensure_visible = true;
                     }
                     // Excel: Enter while a copied range is marked pastes it and ends copy mode.

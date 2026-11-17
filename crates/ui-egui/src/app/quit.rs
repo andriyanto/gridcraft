@@ -7,6 +7,13 @@ impl SheetApp {
         if self.native_windows || self.allow_close || !ctx.input(|i| i.viewport().close_requested()) {
             return;
         }
+        // A command is running in the background, and the workbooks here are as they were before
+        // it: whether there is something to save is known when it is over. The window stays, with
+        // its box and Cancel; closing it again then asks as usual.
+        if self.is_busy() {
+            ctx.send_viewport_cmd(egui::ViewportCommand::CancelClose);
+            return;
+        }
         // A cell still being edited is part of the workbook, as for File › Close.
         if !self.commit_edit(0, 0, false, false) {
             ctx.send_viewport_cmd(egui::ViewportCommand::CancelClose);
@@ -86,6 +93,10 @@ impl SheetApp {
     /// window; Cancel on any of them stops the quit. A draft its
     /// workbook refuses stops the quit too, with its window in front and the reason shown.
     pub fn request_quit(&mut self, ctx: &egui::Context) {
+        // As for the close button: not while a command runs in the background.
+        if self.is_busy() {
+            return;
+        }
         while let Some(window) = self.parked_window_with_draft() {
             self.enter_window(window);
             if self.settle_drafts().is_err() {

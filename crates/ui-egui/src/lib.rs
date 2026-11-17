@@ -25,6 +25,7 @@ pub const UPDATE_APP: craft_update::app::App = craft_update::app::App {
     ..craft_update::suite::GRIDCRAFT
 };
 
+pub mod background;
 pub mod backstage;
 mod border_preview;
 mod cell_pictures;
@@ -334,6 +335,14 @@ pub struct SheetApp {
     /// The update check, the startup prompt and a running self-update (desktop only).
     #[cfg(not(target_arch = "wasm32"))]
     updates_rt: updates_ui::Runtime,
+    /// Runs the commands that change a workbook off the interface thread, so a long
+    /// calculation leaves the window alive (see [`background`]). `None`: every command runs
+    /// where it is asked for.
+    pub background: Option<background::Config>,
+    background_state: background::State,
+    /// The cell entry being committed came from its own keys (Enter, Tab, an arrow): nothing
+    /// that follows in the frame depends on it, so it may go on in the background.
+    commit_from_keys: bool,
 }
 
 /// Strips the engine's error prefixes for message boxes.

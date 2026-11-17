@@ -390,7 +390,7 @@ impl Dialog {
                 json!({"selectLockedCells": true, "selectUnlockedCells": true}),
             ),
             "allowEditRanges" => {
-                let list = app.session.run("review.allowEditRanges", json!({})).unwrap_or(Json::Null);
+                let list = app.engine("review.allowEditRanges", json!({})).unwrap_or(Json::Null);
                 let rows: Vec<String> = list
                     .as_array()
                     .map(|a| {
@@ -932,7 +932,7 @@ impl Dialog {
             "formatCells" => {
                 let mut d = Dialog::custom("formatCells", "Format Cells", json!({}));
                 d.tab = p("tab").as_str().unwrap_or("Number").to_string();
-                if let Ok(st) = app.session.run("cell.get", json!({})) {
+                if let Ok(st) = app.engine("cell.get", json!({})) {
                     d.values.insert("style".into(), st["style"].clone());
                 }
                 d
@@ -1018,7 +1018,7 @@ impl Dialog {
             }
             "recommendedCharts" => {
                 // Insert › Recommended Charts: chart types for the selected data, with previews.
-                let recs = match app.session.run("insert.chartRecommendations", json!({})) {
+                let recs = match app.engine("insert.chartRecommendations", json!({})) {
                     Ok(r) => r,
                     Err(e) => {
                         app.message = Some(("Insert Chart".into(), crate::clean_error(&e)));
@@ -1060,27 +1060,27 @@ impl Dialog {
             "macroEditor" => return crate::macro_editor::open(app, &params),
             "statistics" => {
                 let mut d = Dialog::custom("statistics", "Workbook Statistics", json!({}));
-                d.result = app.session.run("review.workbookStatistics", json!({})).ok();
+                d.result = app.engine("review.workbookStatistics", json!({})).ok();
                 d
             }
             "accessibility" => {
                 let mut d = Dialog::custom("accessibility", "Accessibility", json!({}));
-                d.result = app.session.run("review.checkAccessibility", json!({})).ok();
+                d.result = app.engine("review.checkAccessibility", json!({})).ok();
                 d
             }
             "errorChecking" => {
                 let mut d = Dialog::custom("errorChecking", "Error Checking", json!({}));
-                d.result = app.session.run("formulas.errorChecking", json!({})).ok();
+                d.result = app.engine("formulas.errorChecking", json!({})).ok();
                 d
             }
             "evaluateFormula" => {
                 let mut d = Dialog::custom("evaluateFormula", "Evaluate Formula", json!({}));
-                d.result = app.session.run("formulas.evaluateFormula", json!({})).ok();
+                d.result = app.engine("formulas.evaluateFormula", json!({})).ok();
                 d
             }
             "spelling" => {
                 let mut d = Dialog::custom("spelling", "Spelling", json!({}));
-                d.result = Some(app.session.run("review.spelling", json!({})).unwrap_or_else(|e| json!({"error": e})));
+                d.result = Some(app.engine("review.spelling", json!({})).unwrap_or_else(|e| json!({"error": e})));
                 d
             }
             "chartTitle" => Dialog::form(

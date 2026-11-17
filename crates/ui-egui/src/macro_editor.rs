@@ -1063,7 +1063,7 @@ fn begin_pick(app: &SheetApp, refs: &mut RefPick, key: &str) {
 /// Puts back the sheet and selection from before picking started.
 fn restore_home(app: &mut SheetApp, refs: &RefPick) {
     if let Some((sheet, ranges, active)) = &refs.home {
-        let _ = app.session.run("selection.set", json!({"sheet": sheet, "range": ranges, "active": active}));
+        let _ = app.engine("selection.set", json!({"sheet": sheet, "range": ranges, "active": active}));
     }
 }
 

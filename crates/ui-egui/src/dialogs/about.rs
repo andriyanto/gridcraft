@@ -25,7 +25,6 @@ pub(super) fn about(ui: &mut egui::Ui, d: &mut Dialog) {
             ui.add_space(4.0);
             ui.label("A clean-room, open-source, Rust-native spreadsheet. Part of ArtCraft.");
             ui.hyperlink_to("getartcraft.com/apps/gridcraft", "https://getartcraft.com/apps/gridcraft");
-            ui.hyperlink_to("Join the ArtCraft Discord", "https://discord.gg/artcraft");
             ui.hyperlink_to("Source code: github.com/storytold/gridcraft", "https://github.com/storytold/gridcraft");
             // This copy is built from its own repository: where to get it and its source. The
             // same place its updates come from (`crate::UPDATE_REPO`).

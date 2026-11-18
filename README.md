@@ -17,10 +17,10 @@
 > [!IMPORTANT]
 > **This repository is an independently maintained, modified copy of GridCraft.** The original
 > project is [`storytold/gridcraft`](https://github.com/storytold/gridcraft) by the ArtCraft team.
-> Builds made from this repository are made by [@andriyanto](https://github.com/andriyanto), not
-> by the ArtCraft team, which does not endorse or support them. **No release has been published
-> from this repository yet, and its builds are not code-signed**: see [Downloads](#downloads),
-> [Code signing policy](#code-signing-policy) and [Privacy](#privacy).
+> The builds on this repository's [Releases page](https://github.com/andriyanto/gridcraft/releases)
+> are made by [@andriyanto](https://github.com/andriyanto), not by the ArtCraft team, which does
+> not endorse or support them. These builds are **not code-signed**: see
+> [Downloads](#downloads), [Code signing policy](#code-signing-policy) and [Privacy](#privacy).
 
 <p align="center">
   <img alt="Written in Rust" src="https://img.shields.io/badge/written%20in-Rust-147a40?style=flat-square&logo=rust&logoColor=white">
@@ -209,17 +209,12 @@ numbers and estimates are in [ROADMAP.md](ROADMAP.md); the ranked work list is [
 
 ## Downloads
 
-**No release has been published from this repository yet.** When there is one, it will be on the
-[releases page](https://github.com/andriyanto/gridcraft/releases), the page the app opens for a
-new version. Until then:
+**Download GridCraft** from GitHub: the [latest release](https://github.com/andriyanto/gridcraft/releases/latest)
+has every build listed below, and [all releases](https://github.com/andriyanto/gridcraft/releases)
+has earlier versions and their notes. `<ver>` in the file names is the version number, and
+`SHA256SUMS.txt` lists a checksum for every file.
 
-- **Build it from source**: see [Quick start](#quick-start).
-- **Windows on ARM64 test builds** are made by a GitHub Actions workflow of this repository
-  ([`windows-arm64.yml`](.github/workflows/windows-arm64.yml)) when the maintainer starts it.
-  The MSI is kept with that run as the artifact `gridcraft-windows-arm64` for a few days, and
-  GitHub asks you to sign in to download it. These are test builds, not releases.
-
-Builds made from this repository are **not code-signed**
+These are this repository's own builds, and they are **not code-signed**
 ([Code signing policy](#code-signing-policy)): Windows SmartScreen and macOS Gatekeeper warn
 before the first start. The app tells you about a new release but never installs it itself, on
 any system: **Download** in that prompt, and **Automate ▸ Download Latest…** at any time, open
@@ -227,6 +222,16 @@ the releases page in your browser, and you download and run the new version your
 
 The original project's signed builds, for every system it supports, are on
 [its own releases page](https://github.com/storytold/gridcraft/releases).
+
+| System | Files |
+|---|---|
+| Windows x64 (64-bit Intel/AMD) | `gridcraft-<ver>-windows-x64.msi`, `gridcraft-<ver>-windows-x64-portable.zip` |
+| Windows arm64 (Snapdragon and other ARM PCs) | `gridcraft-<ver>-windows-arm64.msi`, `gridcraft-<ver>-windows-arm64-portable.zip` |
+| macOS, universal (Apple silicon + Intel) | `gridcraft-<ver>-macos-universal.dmg`; command-line tool `gridcraft-cli-<ver>-macos-universal.zip`. Ad-hoc signature, not notarized |
+| Linux x86_64 | `gridcraft-<ver>-linux-x86_64.AppImage`, `.deb`, `.rpm`, `.tar.gz` |
+| Linux aarch64 (ARM64) | `gridcraft-<ver>-linux-aarch64.AppImage`, `.deb`, `.rpm`, `.tar.gz` |
+
+No 32-bit Windows, Flatpak, FreeBSD or web build is published here.
 
 ### Windows troubleshooting
 
@@ -333,16 +338,19 @@ The maintainer of this repository receives no data from the app.
 
 ## Code signing policy
 
-**Status: builds made from this repository are not code-signed, and none has been published as a
-release.** Windows installers and executables carry no signature.
+**Status: the builds published here are not code-signed.** Windows installers and executables
+carry no signature, and the macOS builds carry an ad-hoc signature and are not notarized. Verify
+a download against `SHA256SUMS.txt` in the same release.
 
-How changes and builds are made:
+How a release is made:
 
 - Since this copy was made, every change has reached `main` through a pull request. Many are
   prepared with an AI coding agent (Claude), and the commits say so; the maintainer reviews and
   merges each one.
-- Test builds are made by GitHub Actions in this repository, from a commit in this repository.
-  Nothing built on a personal computer is published.
+- Release files are built by GitHub Actions in this repository, from a commit that is on `main`
+  ([`.github/workflows/release-unsigned.yml`](.github/workflows/release-unsigned.yml),
+  [docs/releasing.md](docs/releasing.md)). Nothing built on a personal computer is published.
+- A release is a draft until the maintainer has checked it and publishes it.
 
 Team roles:
 

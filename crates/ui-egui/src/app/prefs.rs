@@ -65,11 +65,18 @@ impl SheetApp {
         }
     }
 
-    /// Starts the install helper of an update that is ready, so it installs once the process has
-    /// exited (a no-op on the web, and when no update is ready). Call it in `on_exit` when the
-    /// process ends there, since the app is then never dropped.
-    pub fn start_pending_update(&mut self) {
+    /// Automate ▸ Download Latest… (Help ▸ Download Latest Version… on macOS): open this
+    /// repository's releases page in the browser.
+    /// GridCraft never installs an update itself; the person downloads and runs the installer.
+    pub fn download_update(&mut self) {
         #[cfg(not(target_arch = "wasm32"))]
-        updates_ui::start_pending_update(self);
+        {
+            let page = updates_ui::download_page();
+            updates_ui::open_page(self, &page);
+        }
+        #[cfg(target_arch = "wasm32")]
+        {
+            self.message = Some(("GridCraft".into(), "The web version is always the latest release.".into()));
+        }
     }
 }

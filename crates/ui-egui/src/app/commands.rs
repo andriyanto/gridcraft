@@ -203,6 +203,10 @@ impl SheetApp {
                 self.check_for_updates();
                 Ok(Json::Null)
             }
+            "app.downloadUpdate" | "help.downloadUpdate" => {
+                self.download_update();
+                Ok(Json::Null)
+            }
             "ui.printSettings" => printing::settings(&mut self.printing, p, self.services.printers.as_ref()),
             "ui.printSubmit" => self.submit_print(p.clone()),
             "ui.ribbonTab" => {

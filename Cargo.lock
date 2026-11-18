@@ -2027,7 +2027,6 @@ dependencies = [
  "arboard",
  "chrono",
  "craft-print",
- "craft-update",
  "eframe",
  "egui",
  "fmv-macos-events",

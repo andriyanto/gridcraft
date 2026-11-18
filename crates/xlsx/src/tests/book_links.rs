@@ -383,6 +383,16 @@ fn link_targets_are_the_same_text_on_every_system() {
     assert!(!names("Budget.xlsx", &["work"], &["other", "Budget.xlsx"]));
     assert!(!names("../../../../Budget.xlsx", &["work"], &["Budget.xlsx"]), "a path above the root names nothing");
     assert!(!names("https://example.com/Budget.xlsx", &["work"], &["work", "Budget.xlsx"]));
+    // Where a target says the file is, as a path of this system, and back.
+    let at = |target: &str, folder: Option<&[&str]>| crate::link_path(target, folder.map(p).as_deref());
+    assert_eq!(at("../data/My%20Budget.xlsx", Some(&["work", "reports"])), Some(p(&["work", "data", "My Budget.xlsx"])));
+    assert_eq!(at("Budget.xlsx", None), None, "a relative path in a workbook without a folder names nothing");
+    assert_eq!(at("../../../Budget.xlsx", Some(&["work"])), None);
+    assert_eq!(at("https://example.com/Budget.xlsx", Some(&["work"])), None, "a web address is not a file");
+    let whole = crate::link_target_absolute(&p(&["work", "data", "My Budget.xlsx"])).expect("an absolute path has a whole address");
+    assert!(whole.starts_with("file:///"), "{whole}");
+    assert_eq!(at(&whole, None), Some(p(&["work", "data", "My Budget.xlsx"])), "{whole}");
+    assert_eq!(crate::link_target_absolute(Path::new("Budget.xlsx")), None);
     #[cfg(unix)]
     {
         assert!(names("file:////srv/data/Budget.xlsx", &["work"], &["srv", "data", "Budget.xlsx"]));
@@ -444,4 +454,29 @@ fn hostile_link_parts_are_bounded_and_never_crash() {
         assert_eq!(formula(&again, "A1"), formula(&wb, "A1"), "{target}");
         assert!(Unpacked::new(&out).text("xl/worksheets/sheet1.xml").contains("<f>[1]Sheet1!$A$1</f>"), "{target}");
     }
+}
+
+#[test]
+fn a_broken_link_leaves_the_file_when_it_is_the_last() {
+    let cells = r#"<row r="1"><c r="A1"><f>[2]Sheet1!$A$1</f><v>7</v></c><c r="B1"><f>[1]!'item'</f><v>3</v></c></row>"#;
+    let (wb, _) = read_xlsx(&package(&[(DDE, None), (BUDGET, Some(TARGET))], cells, "")).unwrap();
+    assert!(crate::forget_link(&wb, 1).is_none(), "the first keeps its place: the second is known by its number");
+    assert!(crate::forget_link(&wb, 3).is_none() && crate::forget_link(&wb, 0).is_none());
+    // The last one goes, part and all; the other stays where it was.
+    let mut without = wb.clone();
+    without.preserved = Some(Arc::new(crate::forget_link(&wb, 2).expect("the last link can go")));
+    without.links.clear();
+    without.sheet_mut(0).unwrap().set_value(at("A1"), Value::Number(7.0));
+    let u = Unpacked::new(&write_xlsx(&without).unwrap());
+    let links = u.links();
+    assert_eq!(links.len(), 1);
+    assert_eq!(u.0.get(&links[0].0).unwrap(), DDE.as_bytes());
+    assert_eq!(u.0.keys().filter(|k| k.contains("externalLink") && !k.contains("_rels")).count(), 1, "{:?}", u.0.keys());
+    assert!(u.text("xl/worksheets/sheet1.xml").contains("<f>[1]!'item'</f>"));
+    // And then the one before it: the file has no links left.
+    let mut none = without.clone();
+    none.preserved = Some(Arc::new(crate::forget_link(&without, 1).expect("it is the last now")));
+    let u = Unpacked::new(&write_xlsx(&none).unwrap());
+    assert!(u.links().is_empty() && !u.text("xl/workbook.xml").contains("externalReferences"));
+    assert!(!u.0.keys().any(|k| k.contains("externalLink")), "{:?}", u.0.keys());
 }

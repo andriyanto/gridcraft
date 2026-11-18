@@ -78,6 +78,13 @@ impl SheetSel {
             Ok(SheetSel::external(book.to_string(), sheet.to_string()))
         })
     }
+
+    /// Whether a formula can name a workbook `name` between the brackets: the name fits there,
+    /// and is not what a file writes for a link's number (`[1]`).
+    pub fn can_name_book(name: &str) -> bool {
+        let number = !name.is_empty() && name.bytes().all(|b| b.is_ascii_digit());
+        !number && matches!(SheetSel::parse_external(&format!("[{name}]S")), Some(Ok(sel)) if sel.as_external() == Some((name, "S")))
+    }
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]

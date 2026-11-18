@@ -454,9 +454,7 @@ pub fn ref_is_in_book(ref_sheet: Option<&str>, book: &str, shown: &str) -> bool 
 /// Whether a formula can name a workbook `title`: it fits between the brackets, and is not
 /// what a file writes for a link's number.
 pub fn book_can_be_named(title: &str) -> bool {
-    use gridcraft_engine::formula::SheetSel;
-    let number = !title.is_empty() && title.bytes().all(|b| b.is_ascii_digit());
-    !number && matches!(SheetSel::parse_external(&format!("[{title}]S")), Some(Ok(sel)) if sel.as_external() == Some((title, "S")))
+    gridcraft_engine::formula::SheetSel::can_name_book(title)
 }
 
 /// Excel-style AutoComplete: the one distinct text entry in the same column (contiguous data

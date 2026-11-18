@@ -50,8 +50,9 @@ mod read;
 mod rebase;
 mod write;
 
+pub use links::forget_link;
 pub use read::KeptReader;
-pub use rebase::{SheetKept, link_names, link_target, rebase_links};
+pub use rebase::{SheetKept, link_names, link_path, link_target, link_target_absolute, rebase_links};
 #[cfg(test)]
 pub(crate) use write::sheet_names_in;
 pub use write::{KeptOut, SheetIds, WorkbookKept, workbook_elements, write_package_rels, write_workbook};

@@ -1942,10 +1942,10 @@
   },
   {
    "seq": "AK",
-   "kind": "command",
-   "target": "data.queriesConnections",
+   "kind": "dialog",
+   "target": "editLinks",
    "excel": "Edit Links",
-   "note": "Edit Links (Queries & Connections);"
+   "note": ""
   },
   {
    "seq": "AM",

@@ -1,6 +1,6 @@
 # References to other workbooks
 
-> **Last reviewed:** 2026-11-18 · **Last updated:** 2026-11-18 · **Change:** minor (step A4 built: pointing across windows; earlier: step A3; step A2; step A1; the design) · **Target:** Microsoft Excel (Microsoft 365)
+> **Last reviewed:** 2026-11-18 · **Last updated:** 2026-11-18 · **Change:** minor (stage B built: Edit Links, Change Source, Break Link; earlier: steps A1 to A4; the design) · **Target:** Microsoft Excel (Microsoft 365)
 
 A formula that reads a cell of another workbook: `=[Budget.xlsx]Sheet1!B4`. This page is the
 design, written before the work; the table of steps says which are built. Statements about Excel come from the
@@ -176,6 +176,28 @@ names per link, cells kept per link, and the size of a range read from a link (a
 another workbook reads its used part, as a whole column of this one does). Past a limit the
 formula gives an error value; nothing is cut short silently.
 
+### 9. Edit Links: the list, Change Source, Break Link
+
+Data › Edit Links lists the workbooks the active one's formulas read (`data.editLinks`). For
+each: whether it is open here (its values follow it), not open with values from the file, or
+not open with nothing known of it; how many places formulas read; and where its path says it
+is. The path is shown as text and is not looked for.
+
+- **Change Source** (`data.changeLinkSource`) takes a file's path or the name of an open
+  workbook. The formulas and names that read the old workbook read the new one; the link gets
+  the new name and a path relative to this workbook's folder. Stage B reads no file, so when
+  the new workbook is not open nothing is known of it and its formulas are `#REF!` until it is
+  open (stage C reads it at once). A workbook already linked takes the formulas over: the two
+  links become one. A name a formula can't hold is refused.
+- **Break Link** (`data.breakLink`) replaces every cell formula that reads the workbook with
+  its value (a formula that fills several cells with all of them) and takes the link out. It is
+  one Undo step, where Excel's can't be undone. A defined name is not a value: one that reads
+  the workbook stays, and the link with it; the command says which.
+- A link the file brought leaves the file when broken only if it is the last of the file's
+  links: the others are known to formulas by their place in the list, and conditional formats,
+  validation rules and charts keep those numbers as text. One that is not the last keeps its
+  part, and is listed again, read by nothing, when the file is opened again.
+
 ## Steps
 
 Each is one pull request with its tests, and leaves files from Excel reading and saving as before.
@@ -186,7 +208,7 @@ Each is one pull request with its tests, and leaves files from Excel reading and
 | **A2** (done) | Session: copies kept current between open workbooks after every command (`engine/src/book_links.rs`); a source saved under another name is renamed in the formulas that read it | Typed references between open workbooks are live. A source that is not open is `#REF!` until it is |
 | **A3** (done) | File: links read into the model and written from it (`xlsx/src/passthrough/links.rs`), relative targets, one numbering with the kept links | They survive save and open. A file from elsewhere calculates from its saved values and is live once its source is open. Not opened in Excel: see below |
 | **A4** (done) | Interface: pointing across windows (`ui-egui`: `carry_draft`, `EditState::refer`) | Click in the other window, as in Excel: the reference goes into the formula, Enter brings its window back |
-| **B** | Question on open, the saved values with a source closed, Edit Links (Change Source, Break Link) | |
+| **B** (done) | Edit Links: the list with what is known of each source, Change Source, Break Link (`engine/src/cmd/data/links.rs`, `ui-egui/src/dialogs/links.rs`). The saved values with a source closed came with A3; the notice on open comes with C, which gives it something to offer | Data › Edit Links |
 | **C** | Update Values from a closed file | |
 
 A1 and A3 are the large ones. A2 can't be told from A1 without two workbooks open; A4 is the
@@ -209,13 +231,14 @@ smallest and comes last because it makes the feature reachable.
   followed. Whether stage C ever reads one is its own question.
 - **Names and tables of another workbook** (`[Book2]!Total`, `[Book2]Table1[Col]`): refused with
   the formula error in stage A; the file format has room for them.
-- **What Excel shows** for a source open in another instance, or with the same name twice: to
-  observe before stage B.
+- **What Excel shows** for a source open in another instance, or with the same name twice: not
+  observed (stage B was built without it; nothing in it depends on the answer).
 
 ## Revision history
 
 | Date | Change | Summary |
 |---|---|---|
+| 2026-11-18 | minor | B: Edit Links lists the workbooks read and what is known of each; Change Source points the formulas at another workbook; Break Link leaves their values, as one Undo step. Also: the values a source's formulas spilled are read (a reference into a spilled range was blank) |
 | 2026-11-18 | minor | A4: a formula that can take a reference goes with the keyboard to another window; a click there writes `[Name]Sheet!A1`, Enter and Esc bring its own window back |
 | 2026-11-18 | minor | A3: links in files. Read into the model under the source's file name, written back with one numbering; kept parts unchanged unless their values or target changed; paths relative to the saved file, kept after a save; of two open workbooks with one name the link's path says which |
 | 2026-11-18 | minor | A2: the session keeps the values current between open workbooks, follows a source saved under another name, and gives `#REF!` for a source that is not open |

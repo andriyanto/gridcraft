@@ -63,6 +63,12 @@ impl LinkState {
         LinkState { may_read: true, ..LinkState::default() }
     }
 
+    /// How many places of the workbook `book` the formulas read (cells and ranges), as last
+    /// collected.
+    pub(crate) fn reads(&self, book: &str) -> usize {
+        self.needs.iter().filter(|n| same_name(&n.book, book)).count()
+    }
+
     /// After a command changed the cells `changed` of `wb`: notes whether a formula that reads
     /// another workbook may have come in.
     pub(crate) fn note_changed(&mut self, wb: &Workbook, changed: &[gridcraft_calc::Key]) {
@@ -78,7 +84,7 @@ impl LinkState {
 
 /// Whether formula text can hold a reference into another workbook: it has the brackets and the
 /// `!`. (A structured reference has brackets too; the formula is parsed to tell.)
-fn may_read(text: &str) -> bool {
+pub(crate) fn may_read(text: &str) -> bool {
     text.contains('[') && text.contains('!')
 }
 
@@ -139,12 +145,19 @@ fn copy_of(source: &Workbook, had: &ExternalLink, needs: &[&Need]) -> ExternalLi
                 break;
             }
         }
+        // And what formulas spilled into the range: those values are not in the cells.
+        let rows = gridcraft_core::CellRef::new(range.start.row, 0)..=gridcraft_core::CellRef::new(range.end.row, u32::MAX);
+        for (at, value) in sheet.spill.range(rows).filter(|(c, _)| c.col >= range.start.col && c.col <= range.end.col) {
+            if *value != gridcraft_core::Value::Empty && !link.set(&sheet.name, *at, value.clone()) {
+                break;
+            }
+        }
     }
     link
 }
 
 /// The file an open document is, when it has one.
-fn file_of(d: &DocState) -> Option<std::path::PathBuf> {
+pub(crate) fn file_of(d: &DocState) -> Option<std::path::PathBuf> {
     d.path.as_deref().and_then(crate::io::source_path)
 }
 
@@ -194,7 +207,7 @@ impl Session {
     /// The open workbook the name `book` stands for in the formulas of the document `reader`:
     /// the one whose window shows that name. When several do (the same file name in two
     /// folders), the one the reader's link names by its target.
-    fn source_of(&self, reader: usize, book: &str) -> Option<&DocState> {
+    pub(crate) fn source_of(&self, reader: usize, book: &str) -> Option<&DocState> {
         let mut named = self.docs.iter().enumerate().filter(|(i, s)| *i != reader && same_name(&s.display_title(), book)).map(|(_, s)| s);
         let first = named.next()?;
         let Some(second) = named.next() else { return Some(first) };
@@ -217,9 +230,12 @@ impl Session {
         let mut links = out.as_ref().map_or(&d.wb.links, |wb| &wb.links).clone();
         let mut changed = false;
         for link in links.iter_mut() {
-            let Some(target) = self.source_of(doc, &link.name).and_then(file_of).and_then(|file| gridcraft_xlsx::link_target(&file, &folder)) else {
-                continue;
-            };
+            // The file the source is open from; else, for a link made here that names a file by
+            // its whole path (Change Source in a workbook that had no folder yet), that file.
+            let open = self.source_of(doc, &link.name).and_then(file_of);
+            let whole = link.target.as_deref().filter(|t| link.number.is_none() && t.starts_with("file:///"));
+            let file = open.or_else(|| whole.and_then(|t| gridcraft_xlsx::link_path(t, None)));
+            let Some(target) = file.and_then(|file| gridcraft_xlsx::link_target(&file, &folder)) else { continue };
             if link.target.as_deref() != Some(target.as_str()) {
                 Arc::make_mut(link).target = Some(target);
                 changed = true;

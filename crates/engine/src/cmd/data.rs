@@ -19,6 +19,7 @@ use crate::selection::current_region;
 
 mod filter;
 mod grouping;
+mod links;
 mod sort;
 mod tools;
 mod validation;
@@ -36,6 +37,12 @@ use validation::{circle_invalid, validate_cmd, validation};
 pub(super) use validation::{move_rule_formula, remove_validation_cells};
 
 pub fn specs() -> Vec<CommandSpec> {
+    let mut specs = links::specs();
+    specs.extend(own_specs());
+    specs
+}
+
+fn own_specs() -> Vec<CommandSpec> {
     vec![
         cmd!("data.sortAscending", "Sort A to Z", ["Data", "Sort & Filter"], None, "{range?, column?: \"B\"}", has_doc, |s, p| quick_sort(
             s, p, true

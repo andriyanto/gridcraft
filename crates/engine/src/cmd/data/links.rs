@@ -15,7 +15,7 @@ use gridcraft_model::{Formula, Workbook};
 use serde_json::{Value as Json, json};
 
 use crate::cmd::{CommandSpec, bad, cmd, edit, has_doc, str_param};
-use crate::{Result, Session};
+use crate::{EngineError, Result, Session};
 
 /// Most values Break Link writes for the results of formulas that fill many cells.
 const MAX_BROKEN_VALUES: u64 = 2_000_000;
@@ -28,9 +28,27 @@ pub(super) fn specs() -> Vec<CommandSpec> {
             "Change Source",
             ["Data", "Queries & Connections"],
             None,
-            "{link: \"Budget.xlsx\", path: a file | name: an open workbook} → {name}: the formulas that read `link` read that workbook instead",
+            "{link: \"Budget.xlsx\", path: a file | name: an open workbook} → {name, read?, message?}: the formulas that read `link` read that workbook instead; a file that is not open is read at once (`read`)",
             has_doc,
             change_source
+        ),
+        cmd!(
+            noundo "data.updateLinks",
+            "Update Values",
+            ["Data", "Queries & Connections"],
+            None,
+            "{link?: one link, else all} → [{name, status: \"updated\" | \"unchanged\" | \"open\" | \"failed\", message?}]: reads from the files of the linked workbooks that are not open the values this workbook's formulas need",
+            has_doc,
+            update
+        ),
+        cmd!(
+            noundo "data.openLinkSource",
+            "Open Source",
+            ["Data", "Queries & Connections"],
+            None,
+            "{link} → {path}: opens the linked workbook's file (or goes to it when it is open)",
+            has_doc,
+            open_source
         ),
         cmd!(
             "data.breakLink",
@@ -110,6 +128,7 @@ fn change_source(s: &mut Session, p: &Json) -> Result<Json> {
         (None, Some(name)) => (name.to_string(), None),
         (None, None) => return Err(bad(ID, "give the new source: `path` (a file) or `name` (an open workbook)")),
     };
+    let from_file = str_param(p, "path").is_some();
     if !SheetSel::can_name_book(&name) {
         return Err(bad(ID, format!("a formula can't name a workbook called \"{name}\"")));
     }
@@ -135,8 +154,61 @@ fn change_source(s: &mut Session, p: &Json) -> Result<Json> {
             (None, None) => {}
         }
         cx.structural = true;
-        Ok(json!({"name": name}))
-    })
+        Ok(())
+    })?;
+    // A file was named: what the formulas read of it is read at once, unless the workbook is
+    // open here (its values are followed anyway).
+    let reader = s.active_index();
+    let mut result = json!({"name": name});
+    if from_file && s.source_of(reader, &name).is_none() {
+        match s.update_link(reader, &name) {
+            Ok(_) => result["read"] = json!(true),
+            Err(EngineError::Cancelled) => return Err(EngineError::Cancelled),
+            // The change stands; its formulas say `#REF!` until the workbook can be read.
+            Err(e) => {
+                result["read"] = json!(false);
+                result["message"] = json!(e.to_string());
+            }
+        }
+    }
+    Ok(result)
+}
+
+fn update(s: &mut Session, p: &Json) -> Result<Json> {
+    const ID: &str = "data.updateLinks";
+    let reader = s.active_index();
+    let names: Vec<String> = match str_param(p, "link") {
+        Some(_) => vec![link_param(s, p, ID)?],
+        None => s.doc()?.wb.links.iter().map(|l| l.name.clone()).collect(),
+    };
+    let mut results = Vec::new();
+    for name in names {
+        let (status, message) = if s.source_of(reader, &name).is_some() {
+            ("open", None)
+        } else {
+            match s.update_link(reader, &name) {
+                Ok(true) => ("updated", None),
+                Ok(false) => ("unchanged", None),
+                Err(EngineError::Cancelled) => return Err(EngineError::Cancelled),
+                Err(e) => ("failed", Some(e.to_string())),
+            }
+        };
+        results.push(json!({"name": name, "status": status, "message": message}));
+    }
+    Ok(Json::Array(results))
+}
+
+fn open_source(s: &mut Session, p: &Json) -> Result<Json> {
+    const ID: &str = "data.openLinkSource";
+    let name = link_param(s, p, ID)?;
+    let reader = s.active_index();
+    if let Some(uid) = s.source_of(reader, &name).map(|d| d.uid) {
+        s.execute("window.activate", json!({"doc": uid}))?;
+        return Ok(json!({"open": true}));
+    }
+    let path = s.link_file(reader, &name)?.to_string_lossy().into_owned();
+    s.execute("file.open", json!({"path": path}))?;
+    Ok(json!({"path": path}))
 }
 
 /// Whether `formula` reads the workbook `book`.

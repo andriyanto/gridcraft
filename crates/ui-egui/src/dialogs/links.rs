@@ -1,5 +1,5 @@
 //! Data › Edit Links: the other workbooks this one's formulas read (`data.editLinks`), with
-//! Change Source and Break Link for the one selected.
+//! Update Values, Open Source, Change Source and Break Link for the one selected.
 
 use super::{Dialog, Json, SheetApp, json};
 
@@ -70,14 +70,49 @@ pub(super) fn edit_links(app: &mut SheetApp, ui: &mut egui::Ui, d: &mut Dialog, 
         let open_book = app.session.documents().iter().any(|doc| gridcraft_engine::formula::same_name(&doc.display_title(), source));
         let key = if open_book { "name" } else { "path" };
         match app.run("data.changeLinkSource", json!({"link": text(link, "name"), key: source})) {
-            Ok(_) => {
+            Ok(r) => {
                 d.values.remove("source");
+                if r.get("read").and_then(Json::as_bool) == Some(false) {
+                    let why = text(&r, "message");
+                    app.message = Some(("Edit Links".into(), format!("The source was changed, but its values could not be read: {why}")));
+                }
             }
             Err(e) => app.message = Some(("Edit Links".into(), crate::clean_error(&e))),
         }
     }
     ui.add_space(8.0);
     ui.horizontal(|ui| {
+        let closed = selected.as_ref().is_some_and(|l| l.get("status").and_then(Json::as_str) != Some("open"));
+        if ui
+            .add_enabled(closed, egui::Button::new("Update Values"))
+            .on_hover_text("Reads the workbook's file for the values the formulas here need. The file is not opened, and nothing in it runs.")
+            .clicked()
+            && let Some(link) = &selected
+        {
+            match app.run("data.updateLinks", json!({"link": text(link, "name")})) {
+                Ok(r) => {
+                    let failed: Vec<String> = r
+                        .as_array()
+                        .into_iter()
+                        .flatten()
+                        .filter(|l| l.get("status").and_then(Json::as_str) == Some("failed"))
+                        .map(|l| text(l, "message"))
+                        .collect();
+                    if !failed.is_empty() {
+                        app.message = Some(("Edit Links".into(), failed.join("\n\n")));
+                    }
+                }
+                Err(e) => app.message = Some(("Edit Links".into(), crate::clean_error(&e))),
+            }
+        }
+        if ui.add_enabled(selected.is_some(), egui::Button::new("Open Source")).clicked()
+            && let Some(link) = &selected
+        {
+            match app.run("data.openLinkSource", json!({"link": text(link, "name")})) {
+                Ok(_) => *open = false,
+                Err(e) => app.message = Some(("Edit Links".into(), crate::clean_error(&e))),
+            }
+        }
         if ui
             .add_enabled(selected.is_some(), egui::Button::new("Break Link"))
             .on_hover_text("The formulas that read this workbook become their values. Undo brings them back.")

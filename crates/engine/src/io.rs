@@ -267,7 +267,7 @@ fn sane_python_output(v: &gridcraft_core::Value) -> bool {
 }
 
 /// Parses bytes that aren't encrypted, as they are.
-fn read_plain(name: &str, bytes: &[u8], csv_as_text: bool) -> Result<(Workbook, Vec<String>)> {
+pub(crate) fn read_plain(name: &str, bytes: &[u8], csv_as_text: bool) -> Result<(Workbook, Vec<String>)> {
     let kind = FileKind::from_path(name);
     let sniffed = gridcraft_xlsx::sniff(bytes);
     if sniffed == gridcraft_xlsx::Format::Xls {

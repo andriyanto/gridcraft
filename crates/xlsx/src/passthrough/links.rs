@@ -135,11 +135,23 @@ fn view(part: &PreservedPart) -> Option<View> {
 }
 
 /// After a workbook is read: the links its file brought go into the model, and its formulas
-/// name them instead of numbering them.
-pub fn read(wb: &mut Workbook) {
-    let Some(p) = wb.preserved.as_deref() else { return };
+/// name them instead of numbering them. Returns the warning for the links that did not: they
+/// are kept as they are, and the formulas that use them keep the values the file saved.
+pub fn read(wb: &mut Workbook) -> Option<String> {
+    let unread = read_links(wb);
+    (unread > 0).then(|| {
+        let (s, were) = if unread == 1 { ("", "was") } else { ("s", "were") };
+        format!("{unread} link{s} to other sources (not a workbook, or not understood) {were} kept as in the file: formulas that use them keep the values the file saved")
+    })
+}
+
+/// [`read`]; how many of the file's links did not go into the model.
+fn read_links(wb: &mut Workbook) -> usize {
+    let Some(p) = wb.preserved.as_deref() else { return 0 };
+    let parts = kept_parts(p);
+    let brought = parts.len();
     let mut found: Vec<ExternalLink> = Vec::new();
-    for (i, part) in kept_parts(p).into_iter().enumerate().take(MAX_LINKS) {
+    for (i, part) in parts.into_iter().enumerate().take(MAX_LINKS) {
         let number = u32::try_from(i).ok().and_then(|i| i.checked_add(1));
         if let Some(v) = part.and_then(view) {
             found.push(ExternalLink { number, ..v.link });
@@ -149,8 +161,9 @@ pub fn read(wb: &mut Workbook) {
     // both stay numbers.
     let single = |l: &ExternalLink| found.iter().filter(|o| same_name(&o.name, &l.name)).count() == 1;
     let links: Vec<ExternalLink> = found.iter().filter(|l| single(l)).cloned().collect();
+    let unread = brought.saturating_sub(links.len());
     if links.is_empty() {
-        return;
+        return unread;
     }
     let named = |book: &str| {
         let number = book.parse::<u32>().ok().filter(|_| book.bytes().all(|b| b.is_ascii_digit()))?;
@@ -158,6 +171,7 @@ pub fn read(wb: &mut Workbook) {
     };
     wb.rename_books(&named);
     wb.links = links.into_iter().map(Arc::new).collect();
+    unread
 }
 
 /// The kept content of `wb` without the file's link `number`, for a link that was broken: its

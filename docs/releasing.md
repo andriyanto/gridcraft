@@ -1,5 +1,20 @@
 # Releasing GridCraft
 
+## This repository (unsigned builds)
+
+This copy has no signing certificates, so it releases through
+`.github/workflows/release-unsigned.yml` instead of the `release` branch described below:
+
+1. Bump the version on `main` through a pull request: `cargo xtask version set <version>`.
+2. In the Actions tab run **Release (unsigned)** on `main` with "draft" ticked.
+3. Review the draft GitHub Release `GridCraft v<version>` and publish it.
+
+It builds macOS (universal dmg, ad-hoc signature, not notarized), Windows x64 and arm64 (MSI and
+portable zip, unsigned) and Linux x86_64 and aarch64 (AppImage, deb, rpm, tar.gz). It builds no
+Flatpak, FreeBSD or web package. The app looks for a newer version among the published releases
+of this repository and offers it for download; it never installs one itself. The rest of this
+page describes the release inherited from the original project.
+
 Every push to the `release` branch runs `.github/workflows/release.yml`. The workflow builds
 signed installers for macOS, Windows, Linux, FreeBSD and the web, then creates or updates a
 **draft** GitHub Release named `GridCraft v<version>`. Nobody sees a draft until a maintainer

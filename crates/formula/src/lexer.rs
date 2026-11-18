@@ -110,12 +110,35 @@ fn quoted(src: &str, chars: &[(usize, char)], i: usize, start: usize, out: &mut 
     if char_at(chars, j) != Some('!') {
         return Err(LexError { msg: "expected ! after sheet name".into(), pos: byte_pos(src, chars, j) });
     }
+    // `'[Budget.xlsx]Sheet 1'!`: one name, which the parser reads as a workbook and a sheet.
     let (first, last) = match value.split_once(':') {
-        Some((first, last)) => (first.to_string(), Some(last.to_string())),
-        None => (value, None),
+        Some((first, last)) if !value.starts_with('[') => (first.to_string(), Some(last.to_string())),
+        _ => (value, None),
     };
     emit(src, chars, out, Tok::Sheet(first, last), start, j + 1);
     Ok(j + 1)
+}
+
+/// `[Budget.xlsx]Sheet1!` at `i` (the `[`): the index past the `!`. A sheet prefix that names
+/// another workbook, and not the start of a structured reference: the `]` is followed by a sheet
+/// name and `!`, and no table name stands before the `[`.
+fn external_prefix(chars: &[(usize, char)], i: usize, start: usize, out: &[Token]) -> Option<usize> {
+    if out.last().is_some_and(|t| t.end == start && matches!(t.tok, Tok::Word(_))) {
+        return None;
+    }
+    let mut j = i + 1;
+    while char_at(chars, j).is_some_and(|c| !matches!(c, '[' | ']' | '\'' | '!' | '\n')) {
+        j += 1;
+    }
+    if char_at(chars, j) != Some(']') || j == i + 1 {
+        return None;
+    }
+    let sheet = j + 1;
+    let mut end = sheet;
+    while char_at(chars, end).is_some_and(is_word_char) {
+        end += 1;
+    }
+    (end > sheet && char_at(chars, end) == Some('!')).then_some(end + 1)
 }
 
 fn error_literal(src: &str, chars: &[(usize, char)], i: usize, start: usize, out: &mut Vec<Token>) -> Result<usize, LexError> {
@@ -296,7 +319,13 @@ pub fn tokenize_locale(src: &str, locale: crate::FormulaLocale) -> Result<Vec<To
                 i = error_literal(src, &chars, i, start, &mut out)?;
             }
             '[' => {
-                i = structured_ref(src, &chars, i, start, &mut out)?;
+                if let Some(end) = external_prefix(&chars, i, start, &out) {
+                    let name: String = chars.get(i..end - 1).map(|s| s.iter().map(|c| c.1).collect()).unwrap_or_default();
+                    push(&mut out, Tok::Sheet(name, None), end);
+                    i = end;
+                } else {
+                    i = structured_ref(src, &chars, i, start, &mut out)?;
+                }
             }
             '.' if ch(i + 1) == Some(':') => {
                 // Trim reference `A1.:E10` / `A1.:.E10` (the word before stopped at the dot).

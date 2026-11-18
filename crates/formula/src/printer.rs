@@ -17,6 +17,14 @@ fn sheet_prefix(s: &SheetSel) -> String {
             let joined = format!("{a}:{b}");
             if needs_quotes(a) || needs_quotes(b) { format!("'{}'!", joined.replace('\'', "''")) } else { format!("{joined}!") }
         }
+        SheetSel::External(x) => {
+            let (book, sheet) = &**x;
+            let joined = format!("[{book}]{sheet}");
+            // Between its brackets a workbook's name may start with a digit or look like a cell
+            // (`[1]`, `[A1.xlsx]`); it is the other characters that need the quotes.
+            let plain = |c: char| c.is_alphanumeric() || matches!(c, '_' | '.');
+            if !book.chars().all(plain) || needs_quotes(sheet) { format!("'{}'!", joined.replace('\'', "''")) } else { format!("{joined}!") }
+        }
     }
 }
 
@@ -67,7 +75,7 @@ fn push_range_a1(s: &mut String, r: &Reference, sep: &str) {
             s.push_str(&quote_sheet(n));
             s.push('!');
         }
-        sheet @ SheetSel::Span(_) => s.push_str(&sheet_prefix(sheet)),
+        sheet @ (SheetSel::Span(_) | SheetSel::External(_)) => s.push_str(&sheet_prefix(sheet)),
     }
     let dollar = |abs: bool| if abs { "$" } else { "" };
     match &r.kind {

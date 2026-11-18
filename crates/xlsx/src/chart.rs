@@ -339,7 +339,9 @@ fn ref_target(wb: &Workbook, sheet_idx: usize, f: &str) -> Option<(usize, RangeR
     let si = match &r.sheet {
         SheetSel::Current => sheet_idx,
         SheetSel::Named(n) => wb.sheet_index(n)?,
-        SheetSel::Span(..) => return None,
+        // A chart's values are read from this workbook's cells: not from several sheets at
+        // once, and not from what is kept of another workbook.
+        SheetSel::Span(..) | SheetSel::External(..) => return None,
     };
     Some((si, r.range()))
 }

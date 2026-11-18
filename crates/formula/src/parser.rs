@@ -334,7 +334,10 @@ impl Parser {
             Tok::Sheet(a, b) => {
                 let sheet = match b {
                     Some(b) => SheetSel::span(a, b),
-                    None => SheetSel::Named(a),
+                    None => match SheetSel::parse_external(&a) {
+                        Some(external) => external.map_err(|why| self.err(why))?,
+                        None => SheetSel::Named(a),
+                    },
                 };
                 match self.next() {
                     Tok::Word(w) => self.reference_from_word(sheet, &w),
@@ -413,6 +416,9 @@ impl Parser {
             // Sheet-scoped name `Sheet1!MyName`.
             if let SheetSel::Named(s) = sheet {
                 return Ok(Expr::Name(format!("{s}!{w}")));
+            }
+            if sheet.as_external().is_some() {
+                return Err(self.err("a name of another workbook can't be used here: give a cell"));
             }
             return Err(self.err("invalid 3-D reference"));
         }

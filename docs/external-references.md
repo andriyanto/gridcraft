@@ -1,9 +1,9 @@
 # References to other workbooks
 
-> **Last reviewed:** 2026-11-18 · **Last updated:** 2026-11-18 · **Change:** minor (the design, before any of it is built) · **Target:** Microsoft Excel (Microsoft 365)
+> **Last reviewed:** 2026-11-18 · **Last updated:** 2026-11-18 · **Change:** minor (step A1 built; earlier: the design) · **Target:** Microsoft Excel (Microsoft 365)
 
 A formula that reads a cell of another workbook: `=[Budget.xlsx]Sheet1!B4`. This page is the
-design, written before the work. Nothing in it is built yet. Statements about Excel come from the
+design, written before the work; the table of steps says which are built. Statements about Excel come from the
 public file format (ECMA-376, `externalLink` parts) and Microsoft's documentation of external
 references; none was observed in Excel for this page.
 
@@ -76,8 +76,11 @@ stores in the link part, and what GridCraft keeps today as bytes. Evaluation rea
   never needs a second workbook.
 - A formula that reads a link is noted as a reader of links (as readers of hidden rows are
   today). When the copy changes, those formulas and what depends on them are recalculated.
-- A source that is not open, or a cell the copy does not have: the saved value if there is one,
-  else `#REF!`.
+- A cell the copy does not have is blank, as an empty cell is. A sheet the copy does not have
+  is `#REF!`.
+- A formula that reads a workbook this one has **no link to** keeps the value it has. That is
+  how a file's formulas into other workbooks keep the values the file saved, at every
+  recalculation, until the links are read with the file (A3).
 
 ### 4. The session keeps the copies current
 
@@ -134,7 +137,7 @@ Each is one pull request with its tests, and leaves files from Excel reading and
 
 | Step | Content | Seen by a person |
 |---|---|---|
-| **A1** | Formula text: lexer, parser, printer, `SheetSel` for a workbook; moving and copying formulas leaves such a reference alone. Model: the link list. Calculation from the copy. | A typed `=[Book2]Sheet1!A1` gives `#REF!`, or the copy's value. Not offered in the interface yet |
+| **A1** (done) | Formula text: lexer, parser, printer, `SheetSel::External`; edits to this workbook leave such a reference alone, a copied formula shifts it. Model: `Workbook::links`. Calculation from the copy. | A typed `=[Book2]Sheet1!A1` is accepted and stays blank: nothing fills the copy yet. A file's formulas into other workbooks now parse, and keep their saved values |
 | **A2** | Session: copies kept current between open workbooks; rename on Save As | Typed references between open workbooks are live |
 | **A3** | File: links read into and written from the model, relative targets, one numbering with the kept links | They survive save and open, also to and from Excel |
 | **A4** | Interface: pointing across windows | Click in the other window, as in Excel |
@@ -158,3 +161,4 @@ smallest and comes last because it makes the feature reachable.
 | Date | Change | Summary |
 |---|---|---|
 | 2026-11-18 | minor | The design, before any of it is built |
+| 2026-11-18 | minor | A1: such references parse, print and calculate from the values the workbook keeps; a formula into a workbook there is no link to keeps its value |

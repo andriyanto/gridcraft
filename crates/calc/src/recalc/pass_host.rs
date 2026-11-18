@@ -78,6 +78,9 @@ pub(super) struct PassHost<'a> {
     stack_top: usize,
     /// Whether an evaluation ran past the stack budget since the innermost formula started.
     out_of_stack: bool,
+    /// The formula being evaluated read a workbook there is no link to (`Host::note_unlinked`):
+    /// it keeps the value it has.
+    unlinked: bool,
     /// Sum and count of blocks that hold only constants, for `range_sum`. Keyed by sheet, first
     /// cell and last column; each value maps a last row to the block's result (`None`: the block
     /// has a formula, a Python cell, an error value or a spilled value, so every longer one has too).
@@ -159,6 +162,7 @@ impl<'a> PassHost<'a> {
             precision: wb.calc.precision_as_displayed.then(crate::DisplayedPrecision::new),
             stack_top: 0,
             out_of_stack: false,
+            unlinked: false,
             sums: HashMap::default(),
             arrays: HashMap::default(),
             read_once: HashSet::default(),
@@ -446,10 +450,14 @@ impl PassHost<'_> {
         let expr = std::sync::Arc::clone(expr);
         let outer_out_of_stack = std::mem::replace(&mut self.out_of_stack, false);
         self.evaluating.push(Evaluating { key: k, expr: std::sync::Arc::clone(&expr), open_ended: None });
+        let outer_unlinked = std::mem::replace(&mut self.unlinked, false);
         let v = {
             let mut ev = Evaluator::new(self, k.0, k.1);
             ev.value(&expr)
         };
+        // Nothing is known of a workbook it reads: the value it has stays (a file's saved value,
+        // which only that workbook could replace).
+        let v = if std::mem::replace(&mut self.unlinked, outer_unlinked) { self.wb.sheet(k.0).map(|s| s.value(k.1)).unwrap_or_default() } else { v };
         self.evaluating.pop();
         if own_area.is_some() {
             self.own_areas.pop();
@@ -693,6 +701,9 @@ impl Host for PassHost<'_> {
     }
     fn stack_exhausted(&mut self) {
         self.out_of_stack = true;
+    }
+    fn note_unlinked(&mut self) {
+        self.unlinked = true;
     }
     fn spill_range(&mut self, sheet: usize, anchor: CellRef) -> Option<RangeRef> {
         let k = (sheet, anchor);

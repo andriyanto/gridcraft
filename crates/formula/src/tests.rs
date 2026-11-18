@@ -593,3 +593,62 @@ fn a_parsed_formula_keeps_no_unused_room() -> Result<(), Box<dyn std::error::Err
     assert_eq!(rt("SUM(Sheet1:Sheet3!A1)+Sales[@Units]"), "SUM(Sheet1:Sheet3!A1)+Sales[@Units]");
     Ok(())
 }
+
+/// A reference into another workbook (`docs/external-references.md`). It used to be refused:
+/// the `[` began a structured reference and the sheet prefix after it had nothing to follow.
+#[test]
+fn a_sheet_of_another_workbook_parses_and_prints() {
+    assert_eq!(rt("[Budget.xlsx]Sheet1!B4"), "[Budget.xlsx]Sheet1!B4");
+    assert_eq!(rt("[Book2]Sheet1!$A$1:B2+1"), "[Book2]Sheet1!$A$1:B2+1");
+    assert_eq!(rt("SUM([Book2]Data!A:A,[Book2]Data!2:3)"), "SUM([Book2]Data!A:A,[Book2]Data!2:3)");
+    // The number a file writes in place of the name.
+    assert_eq!(rt("[1]Sheet1!A1*2"), "[1]Sheet1!A1*2");
+    // Quoted when the workbook's name or the sheet's needs it, and then as one name.
+    assert_eq!(rt("'[My Budget.xlsx]Sheet 1'!B4"), "'[My Budget.xlsx]Sheet 1'!B4");
+    assert_eq!(rt("'[Budget.xlsx]Sheet1'!B4"), "[Budget.xlsx]Sheet1!B4", "quotes that aren't needed go");
+    assert_eq!(rt("'[It''s.xlsx]Q1'!A1"), "'[It''s.xlsx]Q1'!A1");
+    assert_eq!(rt("'[a-b.xlsx]Sheet1'!A1"), "'[a-b.xlsx]Sheet1'!A1");
+    let e = parse("[Budget.xlsx]Sheet1!B4").unwrap();
+    let Expr::Ref(r) = &e else { panic!("{e:?}") };
+    assert_eq!(r.sheet.as_external(), Some(("Budget.xlsx", "Sheet1")));
+    assert_eq!(r.sheet_name(), None, "it is no sheet of this workbook");
+    assert_eq!(print_r1c1(&e, gridcraft_core::CellRef::new(0, 0)), "[Budget.xlsx]Sheet1!R[3]C[1]");
+}
+
+#[test]
+fn what_is_not_a_cell_of_another_workbook_is_refused_with_its_reason() {
+    for (src, why) in [
+        ("[Book2]Sheet1!Total", "a name of another workbook"),
+        ("'[Book2]'!A1", "a name of another workbook"),
+        ("'[]Sheet1'!A1", "no workbook name"),
+        ("'[Book2]Sheet1:Sheet3'!A1", "names one sheet"),
+        ("'[Book2Sheet1'!A1", "no closing ]"),
+    ] {
+        let e = parse(src).expect_err(src);
+        assert!(e.msg.contains(why), "{src}: {}", e.msg);
+    }
+}
+
+#[test]
+fn structured_references_still_begin_with_a_bracket() {
+    assert_eq!(rt("Table1[Col]"), "Table1[Col]");
+    assert_eq!(rt("SUM(Table1[[#Totals],[Amount]])"), "SUM(Table1[[#Totals],[Amount]])");
+    assert_eq!(rt("[@Amount]*2"), "[@Amount]*2");
+    assert_eq!(rt("[Amount]"), "[Amount]");
+    // A table's column followed by a sheet's cell is two things, not a workbook's sheet.
+    assert_eq!(rt("Table1[Col]+Sheet1!A1"), "Table1[Col]+Sheet1!A1");
+}
+
+/// Rows, columns and sheets of this workbook that move, are renamed or deleted leave a reference
+/// into another workbook as it is; a copied formula shifts it like any relative reference.
+#[test]
+fn edits_to_this_workbook_leave_another_workbook_s_cells_alone() {
+    let e = parse("[Book2]Sheet1!B4+Sheet1!B4+B4").unwrap();
+    let after = adjust(e.clone(), "Sheet1", "Sheet1", &Edit::Insert { axis: Axis::Rows, at: 0, count: 2 });
+    assert_eq!(print(&after), "[Book2]Sheet1!B4+Sheet1!B6+B6");
+    let after = adjust(e.clone(), "Sheet1", "Sheet1", &Edit::Delete { axis: Axis::Rows, at: 3, count: 1 });
+    assert_eq!(print(&after), "[Book2]Sheet1!B4+#REF!+#REF!");
+    assert_eq!(print(&rename_sheet(e.clone(), "Sheet1", "Data")), "[Book2]Sheet1!B4+Data!B4+B4");
+    assert_eq!(print(&crate::adjust::delete_sheet(e.clone(), "Sheet1", &["Sheet1".into(), "Other".into()])), "[Book2]Sheet1!B4+#REF!+B4");
+    assert_eq!(print(&shift_relative(e, 1, 1)), "[Book2]Sheet1!C5+Sheet1!C5+C5");
+}

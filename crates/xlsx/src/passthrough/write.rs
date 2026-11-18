@@ -86,6 +86,12 @@ pub(super) fn part_rels_xml(rels: &[PreservedRel], names: &NameMap) -> String {
 }
 
 pub(super) fn write_parts(out: &mut Out, parts: &[PreservedPart]) -> NameMap {
+    write_parts_but(out, parts, &HashSet::new())
+}
+
+/// [`write_parts`], leaving the parts named in `later` (original names, normalized) for the
+/// caller to write: they get their names here, as relationships to them are written now.
+pub(super) fn write_parts_but(out: &mut Out, parts: &[PreservedPart], later: &HashSet<String>) -> NameMap {
     let mut names = NameMap::new();
     for p in parts {
         names.entry(normalize(&p.name)).or_insert_with(|| out.kept.claim(&p.name));
@@ -93,7 +99,7 @@ pub(super) fn write_parts(out: &mut Out, parts: &[PreservedPart]) -> NameMap {
     let mut written = HashSet::new();
     for p in parts {
         let Some(new) = names.get(&normalize(&p.name)).cloned() else { continue };
-        if !written.insert(new.clone()) {
+        if !written.insert(new.clone()) || later.contains(&normalize(&p.name)) {
             continue;
         }
         out.part(&new, Some(&p.content_type), p.data.to_vec());
@@ -159,9 +165,14 @@ impl SheetIds {
 /// The workbook's kept content as written.
 #[derive(Default)]
 pub struct WorkbookKept {
-    /// Workbook XML elements that go right after `<sheets>` (`<externalReferences>`).
-    pub elements: String,
+    /// Workbook XML elements that go right after `<sheets>` (`<externalReferences>`), before the
+    /// links made here are added to them ([`links::finish`](super::links::finish)).
+    pub(super) elements: String,
     sheets: Vec<KeptSheet>,
+    /// The kept link parts whose links are in the model: written when the formulas are.
+    pub(super) links: Vec<super::links::HeldOut>,
+    /// The names the kept parts got.
+    pub(super) names: NameMap,
 }
 
 impl WorkbookKept {
@@ -293,7 +304,7 @@ pub fn write_workbook(wb: &Workbook, wb_rels: &mut Rels, out: &mut Out) -> Workb
     }
     let parts: Vec<PreservedPart> = p.parts.iter().filter(|q| !gone.contains(&normalize(&q.name))).cloned().collect();
     let rels: Vec<PreservedRel> = p.rels.iter().filter(|r| !dropped_ids.contains(r.id.as_str())).cloned().collect();
-    let names = write_parts(out, &parts);
+    let names = write_parts_but(out, &parts, &super::links::held_parts(wb, p));
     let ids = attach(wb_rels, &rels, &names);
     for r in &p.package_rels {
         if let Some(target) = rel_target(r, &names) {
@@ -314,6 +325,8 @@ pub fn write_workbook(wb: &Workbook, wb_rels: &mut Rels, out: &mut Out) -> Workb
                 })
             })
             .collect(),
+        links: super::links::held_out(wb, p, &names),
+        names,
     }
 }
 

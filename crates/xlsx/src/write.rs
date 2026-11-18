@@ -288,9 +288,13 @@ pub fn write_xlsx_named_with(wb: &Workbook, kind: XlsxKind, book_name: Option<&s
     };
 
     let mut wb_rels = Rels::default();
+    // Formulas name other workbooks by number from here on; the links they read are written
+    // once all of them are.
+    let books = crate::passthrough::links::Numbers::of(wb);
     let (sheets_xml, kept, pivots) = write_sheets(wb, &mut out, active, &mut wb_rels);
 
     let names = write_defined_names(wb, &kept, &out.chart_names);
+    let links = crate::passthrough::links::finish(wb, &kept, &mut wb_rels, &mut out, books);
 
     let mut w = format!("{XML_DECL}<workbook xmlns=\"{NS_MAIN}\" xmlns:r=\"{NS_REL}\">");
     // A workbook read from a file keeps its <fileVersion> as it was: Excel trusts the saved values
@@ -317,7 +321,7 @@ pub fn write_xlsx_named_with(wb: &Workbook, kind: XlsxKind, book_name: Option<&s
     let _ = write!(w, "<bookViews><workbookView activeTab=\"{}\"", kept.file_index(active));
     w.push_str(&workbook_view_attrs(wb));
     let _ = write!(w, "/></bookViews><sheets>{sheets_xml}</sheets>");
-    w.push_str(&kept.elements);
+    w.push_str(&links);
     if !names.is_empty() {
         let _ = write!(w, "<definedNames>{names}</definedNames>");
     }

@@ -119,11 +119,12 @@ fn save(s: &mut Session, p: &Json) -> Result<Json> {
     if std::path::Path::new(&path).extension().and_then(std::ffi::OsStr::to_str).is_some_and(|e| e.eq_ignore_ascii_case("pdf")) {
         return super::print::export_pdf(s, &json!({"path": path}));
     }
+    // The paths of linked workbooks are written from the folder the file goes into.
+    let rebased = s.for_file(s.active_index(), &path);
     let d = s.doc_mut()?;
     // The document's own file keeps the format its content had when opened; any other path
-    // goes by its extension. Relative paths to linked workbooks are rewritten for the new folder.
+    // goes by its extension.
     let kind = crate::io::FileKind::from_path(&path).or(d.content_kind.filter(|_| d.path.as_deref() == Some(path.as_str())));
-    let rebased = crate::io::source_dir(&path).and_then(|f| gridcraft_xlsx::rebase_links(&d.wb, &f));
     let wb = rebased.as_ref().unwrap_or(&d.wb);
     let bytes = match kind {
         Some(kind) => crate::io::save_bytes_as(wb, &path, kind)?,
@@ -138,6 +139,17 @@ fn save(s: &mut Session, p: &Json) -> Result<Json> {
         let file = crate::io::source_path(&path);
         if d.wb.source_path != file {
             std::sync::Arc::make_mut(&mut d.wb).source_path = file;
+        }
+        // And its links are as that file has them: their paths are relative to its folder from
+        // now on, so a later save elsewhere starts from there.
+        let folder = crate::io::source_dir(&path);
+        if rebased.is_some() || d.wb.source_dir != folder {
+            let wb = std::sync::Arc::make_mut(&mut d.wb);
+            if let Some(saved) = rebased {
+                wb.links = saved.links;
+                wb.preserved = saved.preserved;
+            }
+            wb.source_dir = folder;
         }
         d.saved = d.wb.clone();
         d.path = Some(path.clone());

@@ -1,15 +1,16 @@
 # References to other workbooks
 
-> **Last reviewed:** 2026-11-18 · **Last updated:** 2026-11-18 · **Change:** minor (step A2 built; earlier: step A1; the design) · **Target:** Microsoft Excel (Microsoft 365)
+> **Last reviewed:** 2026-11-18 · **Last updated:** 2026-11-18 · **Change:** minor (step A3 built: links in files; earlier: step A2; step A1; the design) · **Target:** Microsoft Excel (Microsoft 365)
 
 A formula that reads a cell of another workbook: `=[Budget.xlsx]Sheet1!B4`. This page is the
 design, written before the work; the table of steps says which are built. Statements about Excel come from the
 public file format (ECMA-376, `externalLink` parts) and Microsoft's documentation of external
 references; none was observed in Excel for this page.
 
-## Where GridCraft is today
+## Where GridCraft was before this work
 
-Checked in the code and by running it, 2026-11-18:
+Checked in the code and by running it, 2026-11-18, before step A1. The table of steps says what
+has changed since:
 
 - **Typing one is refused.** `gridcraft-cli eval "=[Book2.xlsx]Sheet1!A1+1"` answers "There's a
   problem with this formula". The lexer reads `[Book2.xlsx]` as a structured reference and the
@@ -61,10 +62,13 @@ in that system's own form. The formula does not hold it. What a formula holds is
   library's path type, which gives the system's own form. An absolute target from another
   system (`file:///C:/…` opened on Linux) names nothing here: the source counts as not found, the
   saved values are used, and nothing is guessed.
-- `rebase_links` already rewrites relative targets on Save As. It keeps doing so, on the model
-  instead of on kept bytes.
+- `rebase_links` already rewrites relative targets on Save As. It keeps doing so, for the
+  links in the model as for the kept bytes.
 - A source without a path (not saved yet) is written by name alone. It is found again only while
   both are open.
+- On every save the path of a source that is open and has a file is written from where the two
+  files are then. After a save the workbook's paths are relative to the folder it was saved
+  into, so the path outlives the source being closed, and a later Save As starts from there.
 
 ### 3. The values live in the workbook that refers
 
@@ -92,9 +96,12 @@ differs. Also when S is opened, and when a formula that reads S is entered.
   longer what the file has), as an update of links does in Excel.
 - A chain (C reads B reads A) settles in order; a loop across workbooks stops after a fixed
   number of rounds and leaves the values of the last one.
-- Matching is by name for now (the name the source's window shows: its file name, or its title
-  while it has no file). By path when both have one comes with the file's targets (A3): two open
-  workbooks with the same file name in different folders are not told apart yet.
+- Matching is by name (the name the source's window shows: its file name, or its title while
+  it has no file), as a formula names it. When two open workbooks have that name (the same file
+  name in two folders), the one the link's path names is the source; the path is compared as
+  text and nothing is tested for on disk. A workbook of that name from another folder than the
+  link's path says is still the source when it is the only one open: a pair of files moved or
+  sent together keeps working.
 - What a workbook's formulas read is collected once per version of the workbook, and only for
   a workbook that may read another: a session in which none does pays nothing. A workbook that
   does is looked through whole after each of its own changes; that is the part to make
@@ -105,16 +112,35 @@ differs. Also when S is opened, and when a formula that reads S is entered.
 
 ### 5. The file: links become part of the model
 
-`externalLink` parts whose target is a workbook move from kept bytes to the model: read into the
-link list (name, target, sheet names, saved values) and written from it. A link GridCraft does
-not understand (DDE, OLE) stays kept bytes, and keeps its number.
+An `externalLink` part whose target is a workbook is read into the link list (name, target,
+sheet names, saved values) as well as kept as bytes. A link GridCraft does not understand (DDE,
+OLE) stays kept bytes only, and keeps its number.
 
-- The numbers in formulas follow the order of `<externalReferences>` on read and are assigned
-  again on write; a file with both kinds keeps one numbering.
-- Formulas that could not be read before (`[1]Sheet1!A1`) now parse. Their saved values are
-  untouched until something recalculates them.
-- Round trip is tested against the files the pass-through tests use today: the same links, the
-  same targets, the same saved values, with and without an edit in between.
+- **Reading.** The link's name is the file name its target ends in. The formulas and defined
+  names that use its number (`[1]Sheet1!A1`) are rewritten to the name
+  (`[Budget.xlsx]Sheet1!A1`), so they calculate from the saved values and follow the source once
+  it is open. A link stays a number, with its formulas keeping the values the file saved, when
+  all of it is not understood: a value of an unknown kind, a name a formula can't hold or that
+  would read as a number, two links with one file name, more sheets or values than the limits.
+  A sheet the part marks as not read (`refreshError`) is not known to the link: a reference
+  into it is `#REF!`. That reading of the mark comes from the format's description, not from
+  Excel.
+- **Writing.** Formulas get numbers again. A link the file brought keeps its number; links made
+  here follow, in the order formulas first read them; a file with both kinds keeps one
+  numbering. A kept part goes back byte for byte unless the link's values, sheets or target
+  changed. Then its sheet names and values are rewritten in place and everything else in it
+  stays (the other workbook's defined names, extensions). The sheet names keep their places,
+  new ones are added after them, and a sheet nothing is known of is marked as not read. A part
+  whose two elements can't be found as text (a prefix, a comment around them) is written as it
+  was.
+- A link made here is written as a new part when a formula reads it, with every sheet the
+  formulas read listed; a link no formula reads is not written.
+- Conditional formats, validation rules, table formulas and charts are not rewritten on read:
+  there a link keeps its number in the text, which still names the right link when written.
+  What they read of a link the file brought is kept: such a link is brought up to date where
+  the cell formulas read it and otherwise left as the file had it.
+- Round trip is tested against the files the pass-through tests use: the same links, the same
+  targets, the same saved values, with and without an edit in between.
 
 ### 6. Pointing across windows
 
@@ -145,13 +171,21 @@ Each is one pull request with its tests, and leaves files from Excel reading and
 |---|---|---|
 | **A1** (done) | Formula text: lexer, parser, printer, `SheetSel::External`; edits to this workbook leave such a reference alone, a copied formula shifts it. Model: `Workbook::links`. Calculation from the copy. | A typed `=[Book2]Sheet1!A1` is accepted and stays blank: nothing fills the copy yet. A file's formulas into other workbooks now parse, and keep their saved values |
 | **A2** (done) | Session: copies kept current between open workbooks after every command (`engine/src/book_links.rs`); a source saved under another name is renamed in the formulas that read it | Typed references between open workbooks are live. A source that is not open is `#REF!` until it is |
-| **A3** | File: links read into and written from the model, relative targets, one numbering with the kept links | They survive save and open, also to and from Excel |
+| **A3** (done) | File: links read into the model and written from it (`xlsx/src/passthrough/links.rs`), relative targets, one numbering with the kept links | They survive save and open. A file from elsewhere calculates from its saved values and is live once its source is open. Not opened in Excel: see below |
 | **A4** | Interface: pointing across windows | Click in the other window, as in Excel |
 | **B** | Question on open, the saved values with a source closed, Edit Links (Change Source, Break Link) | |
 | **C** | Update Values from a closed file | |
 
 A1 and A3 are the large ones. A2 can't be told from A1 without two workbooks open; A4 is the
 smallest and comes last because it makes the feature reachable.
+
+## Not checked
+
+- **Files GridCraft writes were not opened in Excel.** The parts follow the public format and
+  read back here; whether Excel opens them without a repair prompt, and what it shows for a
+  sheet marked as not read, is to be observed.
+- **A link's values in Excel's own files** were read from parts built by hand after the format's
+  description, not from files Excel wrote.
 
 ## Not decided here
 
@@ -166,6 +200,7 @@ smallest and comes last because it makes the feature reachable.
 
 | Date | Change | Summary |
 |---|---|---|
-| 2026-11-18 | minor | The design, before any of it is built |
+| 2026-11-18 | minor | A3: links in files. Read into the model under the source's file name, written back with one numbering; kept parts unchanged unless their values or target changed; paths relative to the saved file, kept after a save; of two open workbooks with one name the link's path says which |
 | 2026-11-18 | minor | A2: the session keeps the values current between open workbooks, follows a source saved under another name, and gives `#REF!` for a source that is not open |
 | 2026-11-18 | minor | A1: such references parse, print and calculate from the values the workbook keeps; a formula into a workbook there is no link to keeps its value |
+| 2026-11-18 | minor | The design, before any of it is built |

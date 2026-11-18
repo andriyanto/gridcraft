@@ -262,6 +262,7 @@ pub fn handle(app: &mut SheetApp, ctx: &egui::Context, method: &str, p: &Json) -
             for (id, label, params) in [
                 ("ui.ribbonTab", "Ribbon Tab", ""),
                 ("app.checkForUpdates", "Check for Updates…", ""),
+                ("app.downloadUpdate", "Download Latest Version…", ""),
                 ("view.collapseRibbon", "Collapse Ribbon", ""),
                 (
                     "view.expandFormulaBar",

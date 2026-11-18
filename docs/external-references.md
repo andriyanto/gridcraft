@@ -1,6 +1,6 @@
 # References to other workbooks
 
-> **Last reviewed:** 2026-11-18 · **Last updated:** 2026-11-18 · **Change:** minor (step A3 built: links in files; earlier: step A2; step A1; the design) · **Target:** Microsoft Excel (Microsoft 365)
+> **Last reviewed:** 2026-11-18 · **Last updated:** 2026-11-18 · **Change:** minor (step A4 built: pointing across windows; earlier: step A3; step A2; step A1; the design) · **Target:** Microsoft Excel (Microsoft 365)
 
 A formula that reads a cell of another workbook: `=[Budget.xlsx]Sheet1!B4`. This page is the
 design, written before the work; the table of steps says which are built. Statements about Excel come from the
@@ -144,10 +144,23 @@ OLE) stays kept bytes only, and keeps its number.
 
 ### 6. Pointing across windows
 
-A formula at a place where a reference can go stays open when another workbook's window gets
-the keyboard. A click on a cell there puts `[Name]Sheet!A1` into the draft. Enter and Esc there
-act on the draft and bring its own window back, as they now do from another sheet of the same
-workbook. The sheet pointed at does not draw its own selection meanwhile.
+A formula at a place where a reference can go stays open when another window gets the
+keyboard, and goes there with it. A click on a cell there puts `[Name]Sheet!A1` into the draft,
+and the click that brought the window forward already does. Enter and Esc there act on the
+draft and bring its own window back, as they now do from another sheet of the same workbook.
+The sheet pointed at does not draw its own selection meanwhile.
+
+- The draft is one window's at a time (`ui-egui/src/window_ui.rs`, `carry_draft`): the window
+  that has the keyboard shows it in its formula bar, which takes its keys. The window it was
+  typed in shows the text in its cell meanwhile, without an editor.
+- It is entered in the workbook, sheet and cell it was typed in, whichever window Enter is
+  pressed in. A command that enters drafts on its way (Save, New, a close) enters it there
+  too, and then goes on in the window it was asked in.
+- A draft that takes no reference (text, a finished formula) is entered when its window is
+  left, as before. So is a formula when the window gone to has a draft, a dialog or the File
+  view of its own, or shows a workbook whose name a formula can't hold.
+- Another window on the formula's own workbook is pointed at the same way, with references of
+  its own workbook (`Sheet2!A1`).
 
 ### 7. Nothing is read because a file says so
 
@@ -172,7 +185,7 @@ Each is one pull request with its tests, and leaves files from Excel reading and
 | **A1** (done) | Formula text: lexer, parser, printer, `SheetSel::External`; edits to this workbook leave such a reference alone, a copied formula shifts it. Model: `Workbook::links`. Calculation from the copy. | A typed `=[Book2]Sheet1!A1` is accepted and stays blank: nothing fills the copy yet. A file's formulas into other workbooks now parse, and keep their saved values |
 | **A2** (done) | Session: copies kept current between open workbooks after every command (`engine/src/book_links.rs`); a source saved under another name is renamed in the formulas that read it | Typed references between open workbooks are live. A source that is not open is `#REF!` until it is |
 | **A3** (done) | File: links read into the model and written from it (`xlsx/src/passthrough/links.rs`), relative targets, one numbering with the kept links | They survive save and open. A file from elsewhere calculates from its saved values and is live once its source is open. Not opened in Excel: see below |
-| **A4** | Interface: pointing across windows | Click in the other window, as in Excel |
+| **A4** (done) | Interface: pointing across windows (`ui-egui`: `carry_draft`, `EditState::refer`) | Click in the other window, as in Excel: the reference goes into the formula, Enter brings its window back |
 | **B** | Question on open, the saved values with a source closed, Edit Links (Change Source, Break Link) | |
 | **C** | Update Values from a closed file | |
 
@@ -181,6 +194,9 @@ smallest and comes last because it makes the feature reachable.
 
 ## Not checked
 
+- **Pointing was run in real windows on Linux only** (X11, no window manager), and through
+  the window tests. Windows and macOS deliver the keyboard and the first click of a window in
+  their own order: to be tried there.
 - **Files GridCraft writes were not opened in Excel.** The parts follow the public format and
   read back here; whether Excel opens them without a repair prompt, and what it shows for a
   sheet marked as not read, is to be observed.
@@ -200,6 +216,7 @@ smallest and comes last because it makes the feature reachable.
 
 | Date | Change | Summary |
 |---|---|---|
+| 2026-11-18 | minor | A4: a formula that can take a reference goes with the keyboard to another window; a click there writes `[Name]Sheet!A1`, Enter and Esc bring its own window back |
 | 2026-11-18 | minor | A3: links in files. Read into the model under the source's file name, written back with one numbering; kept parts unchanged unless their values or target changed; paths relative to the saved file, kept after a save; of two open workbooks with one name the link's path says which |
 | 2026-11-18 | minor | A2: the session keeps the values current between open workbooks, follows a source saved under another name, and gives `#REF!` for a source that is not open |
 | 2026-11-18 | minor | A1: such references parse, print and calculate from the values the workbook keeps; a formula into a workbook there is no link to keeps its value |

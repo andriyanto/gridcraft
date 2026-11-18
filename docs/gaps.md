@@ -1,6 +1,6 @@
 # Gaps
 
-> **Last reviewed:** 2026-10-11 · **Last updated:** 2026-11-18 · **Change:** trivial (§12: references to other workbooks work between open workbooks and through files; earlier: §12: references to other workbooks; earlier: §17: equations; earlier: §13: Solver Sensitivity report; earlier: §4: chart resizing is no longer a gap; earlier: §13: Analysis ToolPak has all 19 tools; earlier: §4: chart data tables implemented with XLSX round-trip and print/PDF; earlier: §13: Solver Options; earlier: §13: Solver Load/Save Model and Reset All) · **Target:** Microsoft Excel (Microsoft 365)
+> **Last reviewed:** 2026-10-11 · **Last updated:** 2026-11-18 · **Change:** trivial (§12: references to other workbooks can be pointed at in another window; earlier: §12: references to other workbooks work between open workbooks and through files; earlier: §12: references to other workbooks; earlier: §17: equations; earlier: §13: Solver Sensitivity report; earlier: §4: chart resizing is no longer a gap; earlier: §13: Analysis ToolPak has all 19 tools; earlier: §4: chart data tables implemented with XLSX round-trip and print/PDF; earlier: §13: Solver Options; earlier: §13: Solver Load/Save Model and Reset All) · **Target:** Microsoft Excel (Microsoft 365)
 
 Every known shortfall against Excel, one entry each, ranked by user impact (what blocks someone
 using GridCraft for real work first). This is the work list: pick from the top, check the open
@@ -125,9 +125,10 @@ No alpha blockers: every core workflow passes the [alpha gate](roadmap.md#alpha-
   data model (`data.fromWeb`, `data.relationships` missing). **Estimate:** 60–100 h.
 - References to other workbooks (`=[Budget.xlsx]Sheet1!B4`): typed ones work between open
   workbooks and are saved with a relative path; a file that has them calculates from its saved
-  values and follows the source once it is open. **Missing:** pointing at another workbook's
-  window, updating from a closed file, Edit Links, names and tables of another workbook. Files
-  written with links were not opened in Excel. [external-references.md](external-references.md)
+  values and follows the source once it is open; a formula being typed takes references
+  from another workbook's window by a click. **Missing:** updating from a closed file, Edit
+  Links, names and tables of another workbook. Files written with links were not opened in
+  Excel. [external-references.md](external-references.md)
   has the steps.
 
 ### 13. Analysis tools: Solver, Analysis ToolPak, Forecast Sheet (F)
@@ -199,6 +200,7 @@ No alpha blockers: every core workflow passes the [alpha gate](roadmap.md#alpha-
 
 | Date | Change | Summary |
 |---|---|---|
+| 2026-11-18 | trivial | §12: references to other workbooks can be pointed at in another window; closed sources are what is missing |
 | 2026-11-18 | trivial | §12: references to other workbooks work between open workbooks and through files; pointing and closed sources are what is missing |
 | 2026-11-18 | trivial | §12: references to other workbooks, with the design page |
 | 2026-11-02 | minor | §17: equations (Insert › Equation, LaTeX source, gallery, editor) |

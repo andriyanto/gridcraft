@@ -711,6 +711,8 @@ fn about_says_where_this_copy_comes_from() {
     ] {
         assert!(h.query_by_label(line).is_some(), "About shows: {line}");
     }
+    // This copy has no community server of its own, and the original's does not support it.
+    assert!(h.query_by_label_contains("Discord").is_none(), "About offers no Discord link");
 }
 
 #[test]

@@ -1,0 +1,206 @@
+# This repository's own release: unsigned builds for macOS (universal), Windows (x64, arm64) and
+# Linux (x86_64, aarch64), on GitHub's standard runners. release.yml is the release inherited from
+# the original project; it needs that project's signing secrets and a paid macOS runner, so it
+# cannot run here.
+#
+# Run it from the Actions tab on `main` with "draft" ticked: it builds everything and leaves a draft
+# GitHub Release `GridCraft v<version>` with SHA256SUMS.txt for the owner to review and publish.
+# A pull request that changes this file builds everything too, without drafting a release.
+name: Release (unsigned)
+
+on:
+  workflow_dispatch:
+    inputs:
+      draft:
+        description: "Draft a GitHub Release from the builds"
+        type: boolean
+        default: true
+  pull_request:
+    paths:
+      - .github/workflows/release-unsigned.yml
+
+permissions:
+  contents: read
+
+concurrency:
+  group: release-unsigned-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  CARGO_TERM_COLOR: always
+  CARGO_INCREMENTAL: 0
+  RUST_BACKTRACE: 1
+  CRAFT_FONTS_REF: b076417b5880bd4154bd22f00695b1d28c6bea83
+
+jobs:
+  version:
+    timeout-minutes: 10
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.v.outputs.version }}
+      date: ${{ steps.v.outputs.date }}
+      prerelease: ${{ steps.v.outputs.prerelease }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - id: v
+        name: Resolve version
+        uses: storytold/craft-common-actions/actions/resolve-version@293de72429d3ed5d9fa92aded5e500544c0fa28f
+        with:
+          app-title: GridCraft
+
+  macos:
+    timeout-minutes: 120
+    name: macOS universal
+    needs: [version]
+    runs-on: macos-15
+    env:
+      VERSION: ${{ needs.version.outputs.version }}
+      BUILD_DATE: ${{ needs.version.outputs.date }}
+      BUILD_SHA: ${{ github.sha }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: storytold/craft-common-actions/actions/export-app-build-env@293de72429d3ed5d9fa92aded5e500544c0fa28f
+        with:
+          app-name: gridcraft
+          version: ${{ needs.version.outputs.version }}
+          date: ${{ needs.version.outputs.date }}
+      - uses: storytold/craft-common-actions/actions/checkout-craft-fonts@293de72429d3ed5d9fa92aded5e500544c0fa28f
+        with:
+          ref: ${{ env.CRAFT_FONTS_REF }}
+      - uses: storytold/craft-common-actions/actions/checkout-craft-i18n@293de72429d3ed5d9fa92aded5e500544c0fa28f
+      - uses: step-security/dtolnay-rust-toolchain@8dd607977d06adf4ed49b190381e74c17a9dd25f # v1.0.0
+        with:
+          toolchain: stable
+          targets: aarch64-apple-darwin, x86_64-apple-darwin
+      - uses: step-security/rust-cache@8871c8ba063416da7c32246932ea6ae08700453e # v2.9.2
+        with:
+          key: unsigned-macos-universal
+      # No MACOS_SIGN_IDENTITY: package.sh signs ad hoc and does not notarize.
+      - name: Build and package (ad-hoc signature, not notarized)
+        env:
+          CRAFT_FONTS_DIR: ${{ github.workspace }}/craft-fonts
+          CRAFT_FONTS_REQUIRED: "1"
+        run: packaging/macos/package.sh --arch universal
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: release-macos
+          path: dist/release/*
+          if-no-files-found: error
+
+  windows:
+    timeout-minutes: 90
+    name: Windows ${{ matrix.arch }}
+    needs: [version]
+    runs-on: ${{ matrix.runner }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { arch: x64, target: x86_64-pc-windows-msvc, runner: windows-latest }
+          - { arch: arm64, target: aarch64-pc-windows-msvc, runner: windows-11-arm }
+    env:
+      VERSION: ${{ needs.version.outputs.version }}
+      BUILD_DATE: ${{ needs.version.outputs.date }}
+      BUILD_SHA: ${{ github.sha }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: storytold/craft-common-actions/actions/export-app-build-env@293de72429d3ed5d9fa92aded5e500544c0fa28f
+        with:
+          app-name: gridcraft
+          version: ${{ needs.version.outputs.version }}
+          date: ${{ needs.version.outputs.date }}
+      - uses: storytold/craft-common-actions/actions/checkout-craft-fonts@293de72429d3ed5d9fa92aded5e500544c0fa28f
+        with:
+          ref: ${{ env.CRAFT_FONTS_REF }}
+      - uses: storytold/craft-common-actions/actions/checkout-craft-i18n@293de72429d3ed5d9fa92aded5e500544c0fa28f
+      - uses: step-security/dtolnay-rust-toolchain@8dd607977d06adf4ed49b190381e74c17a9dd25f # v1.0.0
+        with:
+          toolchain: stable
+          targets: ${{ matrix.target }}
+      - uses: step-security/rust-cache@8871c8ba063416da7c32246932ea6ae08700453e # v2.9.2
+        with:
+          key: unsigned-windows-${{ matrix.arch }}
+      - uses: storytold/craft-common-actions/actions/install-wix@293de72429d3ed5d9fa92aded5e500544c0fa28f
+      - name: Build and package (unsigned)
+        shell: pwsh
+        env:
+          CRAFT_FONTS_DIR: ${{ github.workspace }}/craft-fonts
+          CRAFT_FONTS_REQUIRED: "1"
+        run: ./packaging/windows/package.ps1 -Arch ${{ matrix.arch }}
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: release-windows-${{ matrix.arch }}
+          path: dist/release/*
+          if-no-files-found: error
+
+  linux:
+    timeout-minutes: 90
+    name: Linux ${{ matrix.arch }}
+    needs: [version]
+    runs-on: ${{ matrix.runner }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { arch: x86_64, runner: ubuntu-22.04, deb: amd64 }
+          - { arch: aarch64, runner: ubuntu-22.04-arm, deb: arm64 }
+    env:
+      VERSION: ${{ needs.version.outputs.version }}
+      BUILD_DATE: ${{ needs.version.outputs.date }}
+      BUILD_SHA: ${{ github.sha }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: storytold/craft-common-actions/actions/export-app-build-env@293de72429d3ed5d9fa92aded5e500544c0fa28f
+        with:
+          app-name: gridcraft
+          version: ${{ needs.version.outputs.version }}
+          date: ${{ needs.version.outputs.date }}
+      - uses: storytold/craft-common-actions/actions/checkout-craft-fonts@293de72429d3ed5d9fa92aded5e500544c0fa28f
+        with:
+          ref: ${{ env.CRAFT_FONTS_REF }}
+      - uses: storytold/craft-common-actions/actions/checkout-craft-i18n@293de72429d3ed5d9fa92aded5e500544c0fa28f
+      - uses: storytold/craft-common-actions/actions/install-linux-deps@293de72429d3ed5d9fa92aded5e500544c0fa28f
+        with:
+          deb-arch: ${{ matrix.deb }}
+          nfpm-version: "2.47.0"
+      - uses: step-security/dtolnay-rust-toolchain@8dd607977d06adf4ed49b190381e74c17a9dd25f # v1.0.0
+        with:
+          toolchain: stable
+      - uses: step-security/rust-cache@8871c8ba063416da7c32246932ea6ae08700453e # v2.9.2
+        with:
+          key: unsigned-linux-${{ matrix.arch }}
+      - name: Build and package (AppImage, deb, rpm, tar.gz)
+        env:
+          CRAFT_FONTS_DIR: ${{ github.workspace }}/craft-fonts
+          CRAFT_FONTS_REQUIRED: "1"
+        run: packaging/linux/package.sh
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: release-linux-${{ matrix.arch }}
+          path: dist/release/*
+          if-no-files-found: error
+
+  release:
+    timeout-minutes: 10
+    name: Draft GitHub Release
+    if: github.event_name == 'workflow_dispatch' && inputs.draft
+    needs: [version, macos, windows, linux]
+    runs-on: ubuntu-24.04
+    # Only this job writes to the repository.
+    permissions:
+      contents: write
+    steps:
+      - uses: storytold/craft-common-actions/actions/draft-release@293de72429d3ed5d9fa92aded5e500544c0fa28f
+        with:
+          version: ${{ needs.version.outputs.version }}
+          app-title: GridCraft
+          prerelease: ${{ needs.version.outputs.prerelease }}
+          github-token: ${{ secrets.GITHUB_TOKEN }}

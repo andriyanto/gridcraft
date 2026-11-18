@@ -7,6 +7,11 @@ pub(super) fn data(app: &mut SheetApp, ui: &mut Ui) {
     if gd.clicked() {
         app.open_dialog("open", json!({}));
     }
+    let __k = big_button(ui, Icon::Link, "Edit\nLinks", "The other workbooks this one's formulas read", false);
+    control_keytip(app, ui, &__k, "dialog:editLinks");
+    if __k.clicked() {
+        app.open_dialog("editLinks", json!({}));
+    }
     sep(ui);
     ui.vertical(|ui| {
         let __k = small_button(ui, Icon::SortAsc, "", "Sort A to Z", false);

@@ -22,6 +22,7 @@ mod data;
 mod find;
 mod format_cells;
 mod insert_function;
+mod links;
 mod names;
 mod paste;
 mod ref_edit;
@@ -992,6 +993,7 @@ impl Dialog {
                 Dialog::custom("sort", "Sort", json!({"header": true, "levels": [{"column": col, "order": "asc"}]}))
             }
             "nameManager" => Dialog::custom("nameManager", "Name Manager", json!({})),
+            "editLinks" => Dialog::custom("editLinks", "Edit Links", json!({})),
             "pasteName" => {
                 // F3 opens it only when the workbook has names to paste, as in Excel.
                 let names = pasteable_names(app);

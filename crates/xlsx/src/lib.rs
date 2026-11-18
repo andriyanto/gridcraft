@@ -51,7 +51,7 @@ pub use crypto::{DecryptError, check_encryption, decrypt};
 pub use csv::{MAX_CSV_BYTES, decode_text, read_csv, read_csv_with_report, write_csv, write_csv_limited};
 pub use ods::read_ods;
 pub use package::MAX_PART;
-pub use passthrough::{link_names, link_target, rebase_links};
+pub use passthrough::{forget_link, link_names, link_path, link_target, link_target_absolute, rebase_links};
 pub use xls::{read_xls, read_xls_with};
 pub use xlsb::read_xlsb;
 

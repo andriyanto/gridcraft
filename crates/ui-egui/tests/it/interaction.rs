@@ -708,6 +708,7 @@ fn dialogs_open_and_close() {
         "find",
         "sort",
         "nameManager",
+        "editLinks",
         "dataValidation",
         "pasteSpecial",
         "commandSearch",

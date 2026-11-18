@@ -176,6 +176,54 @@ pub fn link_target(source: &Path, folder: &Path) -> Option<String> {
     rebase(&encode_name(&name), &Folder::of(source.parent()?)?, &Folder::of(folder)?)
 }
 
+/// The target for a link to the workbook at `source` (an absolute path) from a workbook that
+/// has no folder yet: a `file:///` address. A save writes it relative to the folder saved into
+/// where it can ([`link_target`]).
+pub fn link_target_absolute(source: &Path) -> Option<String> {
+    let folder = Folder::of(source.parent()?)?;
+    let name = source.file_name()?.to_string_lossy().into_owned();
+    let sep = if folder.root.contains('\\') { "\\" } else { "/" };
+    let names: Vec<&str> = folder.names.iter().map(String::as_str).chain([name.as_str()]).collect();
+    Some(format!("file:///{}{}", folder.root, names.join(sep)))
+}
+
+/// The folder and file name a link's `target` names, written in a workbook in `folder`
+/// (`None`: the workbook has no folder, so only an absolute target names anything).
+fn named_by(target: &str, folder: Option<&Path>) -> Option<(Folder, String)> {
+    if is_relative_path(target) {
+        let from = Folder::of(folder?)?;
+        let mut names = from.names;
+        for seg in target.split(['/', '\\']) {
+            match seg {
+                "" | "." => {}
+                ".." => {
+                    names.pop()?;
+                }
+                _ => names.push(decode_name(seg)),
+            }
+        }
+        let file = names.pop()?;
+        Some((Folder { root: from.root, names }, file))
+    } else {
+        // `file:///C:\folder\Book.xlsx`, `file:////home/me/Book.xlsx`: the path as it is.
+        let rest = target.strip_prefix("file:///")?;
+        let path = [rest.to_string(), format!("/{rest}")].into_iter().map(std::path::PathBuf::from).find(|p| p.is_absolute())?;
+        Some((Folder::of(path.parent()?)?, path.file_name()?.to_string_lossy().into_owned()))
+    }
+}
+
+/// The file a link's `target` names, written in a workbook in `folder`: where the linked
+/// workbook would be on this system, worked out from the text alone. Nothing is opened or
+/// tested for. `None` for a web address, a path above the root, a relative path in a workbook
+/// without a folder, and a path of another system (`file:///C:/…` on Linux).
+pub fn link_path(target: &str, folder: Option<&Path>) -> Option<std::path::PathBuf> {
+    let (folder, file) = named_by(target, folder)?;
+    let mut path = std::path::PathBuf::from(&folder.root);
+    path.extend(&folder.names);
+    path.push(file);
+    path.is_absolute().then_some(path)
+}
+
 /// Whether a link's `target`, as written in a workbook in `folder`, names the file at `file`,
 /// by the text of the two alone (nothing is opened or tested for). A target from another system
 /// (`file:///C:/…` on Linux) names nothing here.
@@ -183,30 +231,8 @@ pub fn link_names(target: &str, folder: &Path, file: &Path) -> bool {
     let (Some(at), Some(name)) = (file.parent().and_then(Folder::of), file.file_name().map(|n| n.to_string_lossy().into_owned())) else {
         return false;
     };
-    let named = if is_relative_path(target) {
-        Folder::of(folder).and_then(|from| {
-            let mut names = from.names;
-            for seg in target.split(['/', '\\']) {
-                match seg {
-                    "" | "." => {}
-                    ".." => {
-                        names.pop()?;
-                    }
-                    _ => names.push(decode_name(seg)),
-                }
-            }
-            let file = names.pop()?;
-            Some((Folder { root: from.root, names }, file))
-        })
-    } else {
-        // `file:///C:\folder\Book.xlsx`, `file:////home/me/Book.xlsx`: the path as it is.
-        target.strip_prefix("file:///").and_then(|rest| {
-            let path = [rest.to_string(), format!("/{rest}")].into_iter().map(std::path::PathBuf::from).find(|p| p.is_absolute())?;
-            Some((Folder::of(path.parent()?)?, path.file_name()?.to_string_lossy().into_owned()))
-        })
-    };
     let same = |a: &str, b: &str| if cfg!(windows) { a.eq_ignore_ascii_case(b) } else { a == b };
-    named.is_some_and(|(folder, file)| {
+    named_by(target, Some(folder)).is_some_and(|(folder, file)| {
         same(&file, &name)
             && folder.root.eq_ignore_ascii_case(&at.root)
             && folder.names.len() == at.names.len()

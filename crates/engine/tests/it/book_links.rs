@@ -82,6 +82,18 @@ fn blocks_whole_columns_text_and_errors_come_across() {
 }
 
 #[test]
+fn values_a_formula_of_the_source_spilled_are_read_too() {
+    let mut s = session(&["Report", "Budget"]);
+    set(&mut s, 1, "A1", "=SEQUENCE(3)");
+    set(&mut s, 0, "B1", "=SUM([Budget]Sheet1!A1:A3)");
+    set(&mut s, 0, "B2", "=[Budget]Sheet1!A3");
+    set(&mut s, 0, "B3", "=SUM([Budget]Sheet1!A:A)");
+    assert_eq!((value(&s, 0, "B1"), value(&s, 0, "B2"), value(&s, 0, "B3")), (Value::Number(6.0), Value::Number(3.0), Value::Number(6.0)));
+    set(&mut s, 1, "A1", "=SEQUENCE(4)");
+    assert_eq!((value(&s, 0, "B1"), value(&s, 0, "B3")), (Value::Number(6.0), Value::Number(10.0)));
+}
+
+#[test]
 fn a_sheet_the_source_does_not_have_is_a_ref_error_until_it_has_it() {
     let mut s = session(&["Report", "Budget"]);
     set(&mut s, 0, "A1", "=[Budget]Totals!A1");

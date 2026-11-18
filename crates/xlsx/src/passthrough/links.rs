@@ -160,6 +160,46 @@ pub fn read(wb: &mut Workbook) {
     wb.links = links.into_iter().map(Arc::new).collect();
 }
 
+/// The kept content of `wb` without the file's link `number`, for a link that was broken: its
+/// part and its place in `<externalReferences>` go. Only the last of the file's links can go
+/// this way, as formulas know the others by their place in that list. `None` for any other (it
+/// keeps its place, so that the links after it keep their numbers) and for one that is not there.
+pub fn forget_link(wb: &Workbook, number: u32) -> Option<Preserved> {
+    let p = wb.preserved.as_deref()?;
+    let at = p.elements.iter().position(|e| e.slot == "externalReferences")?;
+    let list = xml::parse(p.elements.get(at)?.xml.as_bytes()).ok()?;
+    let mut ids: Vec<String> = list.kids("externalReference").filter_map(|r| r.attr("id")).map(str::to_string).collect();
+    if usize::try_from(number).ok() != Some(ids.len()) {
+        return None;
+    }
+    let gone = ids.pop()?;
+    let mut out = p.clone();
+    out.rels.retain(|r| r.id != gone);
+    if ids.is_empty() {
+        out.elements.remove(at);
+    } else if let Some(e) = out.elements.get_mut(at) {
+        let mut x = format!("<externalReferences xmlns:r=\"{NS_REL}\">");
+        for id in &ids {
+            let _ = write!(x, "<externalReference r:id=\"{}\"/>", esc_attr(id));
+        }
+        x.push_str("</externalReferences>");
+        e.xml = x;
+    }
+    // The parts nothing reaches any more go with it.
+    let mut reached: HashSet<String> = HashSet::new();
+    let mut queue: VecDeque<String> = out.rels.iter().chain(&out.package_rels).filter(|r| !r.external).map(|r| normalize(&r.target)).collect();
+    while let Some(name) = queue.pop_front() {
+        if !reached.insert(name.clone()) {
+            continue;
+        }
+        if let Some(part) = out.parts.iter().find(|q| normalize(&q.name) == name) {
+            queue.extend(part.rels.iter().filter(|r| !r.external).map(|r| normalize(&r.target)));
+        }
+    }
+    out.parts.retain(|q| reached.contains(&normalize(&q.name)));
+    Some(out)
+}
+
 // ---------------------------------------------------------------- numbers while writing
 
 /// The numbers formulas get while one workbook is written.

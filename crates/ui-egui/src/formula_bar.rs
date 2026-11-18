@@ -116,7 +116,8 @@ pub fn show(app: &mut SheetApp, ui: &mut egui::Ui) {
                     app.cancel_edit();
                 }
                 if crate::widgets::icon_button(ui, Icon::Check, c, "Enter", vec2(22.0, 24.0)).clicked() && editing {
-                    app.commit_edit(0, 0, false, false);
+                    // The editor's own entry, as Enter is.
+                    app.commit_edit_from_keys(0, 0, false, false, false);
                 }
                 let fx = crate::widgets::icon_button(ui, Icon::Fx, t.text, "Insert Function", vec2(26.0, 24.0));
                 if fx.clicked() {
@@ -654,6 +655,11 @@ pub fn editor_widget(app: &mut SheetApp, ui: &mut egui::Ui, id: egui::Id, font: 
 /// sheet only, and an edit that began in the cell has its keys there, so on the other sheet
 /// nothing took them: Enter, Esc and typing did nothing until the formula bar was clicked.
 fn cell_editor_out_of_sight(app: &SheetApp, ed: &crate::editor::EditState) -> bool {
+    // In another window, where the formula went for its references, the bar is the one editor
+    // too, unless that window shows the draft's own sheet (another window on its workbook).
+    if ed.away {
+        return app.view_key() != Some((ed.doc, ed.sheet));
+    }
     let here = ed.window.is_none_or(|w| app.session.active_window() == Some(w));
     here && app.session.active().is_some_and(|d| d.uid == ed.doc && d.wb.active_sheet() != ed.sheet)
 }

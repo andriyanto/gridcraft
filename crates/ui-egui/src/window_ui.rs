@@ -149,6 +149,53 @@ impl SheetApp {
         self.follow_active_window();
     }
 
+    /// Window `to`, which is being drawn, has just got the keyboard from window `from`. A
+    /// formula open there at a place where a reference can go comes along instead of being
+    /// entered: cells clicked in this window go into it (`[Budget.xlsx]Sheet1!B4` from another
+    /// workbook), its text and keys are in this window's formula bar, and Enter or Esc take it
+    /// back to its own window. A draft that is away keeps going from window to window, and is
+    /// at home again when its own window gets the keyboard.
+    ///
+    /// Any other draft stays where it is, to be entered as before; so does this one when the
+    /// window has something of its own that takes the keyboard, or shows a workbook whose
+    /// name a formula can't hold. Whether the draft came along.
+    pub(crate) fn carry_draft(&mut self, from: u64, to: u64) -> bool {
+        if from == to || self.ui_window != Some(to) || self.is_busy() {
+            return false;
+        }
+        if self.editor.is_some() || self.text_box_editor.is_some() || self.dialog.is_some() || self.backstage.is_some() {
+            return false;
+        }
+        let Some(shown) = self.session.active().map(|d| (d.uid, d.display_title())) else { return false };
+        let Some(parked) = self.parked.get_mut(&from) else { return false };
+        let comes = parked.editor.as_ref().is_some_and(|ed| {
+            let home = ed.window == Some(to);
+            let named = shown.0 == ed.doc || editor::book_can_be_named(&shown.1);
+            !ed.python && ed.is_formula() && (ed.away || ed.can_point()) && (home || named)
+        });
+        if !comes || parked.dialog.is_some() {
+            return false;
+        }
+        let Some(mut ed) = parked.editor.take() else { return false };
+        parked.mode = gridcraft_engine::Mode::Ready;
+        ed.away = ed.window != Some(to);
+        // Both name a place in the window left behind.
+        ed.point_cell = None;
+        ed.point_anchor = None;
+        ed.request_focus = true;
+        ed.sync_caret = true;
+        self.session.mode = if ed.can_point() { gridcraft_engine::Mode::Point } else { gridcraft_engine::Mode::Edit };
+        self.editor = Some(ed);
+        true
+    }
+
+    /// The formula that left this window for its references, while it is away: this window
+    /// still shows it in its cell.
+    pub(crate) fn draft_gone_away(&self) -> Option<&editor::EditState> {
+        let here = self.ui_window?;
+        self.parked.values().filter_map(|w| w.editor.as_ref()).find(|ed| ed.away && ed.window == Some(here))
+    }
+
     /// Puts back a dialog that was taken out of window `home`'s fields while it ran. A command
     /// run from the dialog may have switched windows meanwhile; the dialog stays in the window it
     /// was opened in (dropped if that window closed).

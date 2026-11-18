@@ -196,6 +196,15 @@ impl DocWindows {
             |_, w| base.clone().with_title(titles.get(w).cloned().unwrap_or_default()),
             |ui, _, w| {
                 app.show_window(*w);
+                // This window has just got the keyboard: a formula that can take a reference
+                // comes along from the window left, before the click that brought the keyboard
+                // here is looked at, so that click already points. (Each window knows in its
+                // own pass whether it has the keyboard; another window's is last frame's.)
+                if let Some(from) = focused.filter(|from| from != w)
+                    && ui.ctx().input(|i| i.viewport().focused) == Some(true)
+                {
+                    app.carry_draft(from, *w);
+                }
                 // Files dropped on a window open as workbooks (the root's arrive through the app's
                 // raw input hook; a child window's input reaches only its own pass).
                 let dropped: Vec<String> = ui

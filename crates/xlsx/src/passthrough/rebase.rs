@@ -125,34 +125,93 @@ fn close_tag_from(x: &str, from: usize, local: &str) -> Option<usize> {
 
 // ---------------------------------------------------------------- linked workbooks
 
-/// `wb` as it is saved into the folder `to` (absolute): the relative paths of its linked
+/// A copy of `wb` for saving into the folder `to`: the relative paths of its links to other
 /// workbooks, relative to the folder it was read from, are rewritten relative to `to`, as Excel
-/// does on Save As, or made absolute when no relative path exists (another drive). `None` when
+/// does on Save As, or made absolute when no relative path exists (another drive). That is the
+/// paths in the content kept from its file and those of the links in the model. `None` when
 /// nothing changes.
 pub fn rebase_links(wb: &Workbook, to: &Path) -> Option<Workbook> {
-    let p = wb.preserved.as_deref()?;
     let from = Folder::of(wb.source_dir.as_deref()?)?;
     let to = Folder::of(to)?;
     if from == to {
         return None;
     }
-    let mut parts = p.parts.clone();
+    let mut out: Option<Workbook> = None;
+    if let Some(p) = wb.preserved.as_deref() {
+        let mut parts = p.parts.clone();
+        let mut changed = false;
+        for r in parts.iter_mut().flat_map(|part| part.rels.iter_mut()) {
+            if r.external
+                && is_kind(r, &["externalLinkPath"])
+                && let Some(target) = rebase(&r.target, &from, &to)
+            {
+                r.target = target;
+                changed = true;
+            }
+        }
+        if changed {
+            out.get_or_insert_with(|| wb.clone()).preserved = Some(Arc::new(Preserved { parts, ..p.clone() }));
+        }
+    }
+    let mut links = wb.links.clone();
     let mut changed = false;
-    for r in parts.iter_mut().flat_map(|part| part.rels.iter_mut()) {
-        if r.external
-            && is_kind(r, &["externalLinkPath"])
-            && let Some(target) = rebase(&r.target, &from, &to)
-        {
-            r.target = target;
+    for link in links.iter_mut() {
+        if let Some(target) = link.target.as_deref().and_then(|t| rebase(t, &from, &to)) {
+            Arc::make_mut(link).target = Some(target);
             changed = true;
         }
     }
-    if !changed {
-        return None;
+    if changed {
+        out.get_or_insert_with(|| wb.clone()).links = links;
     }
-    let mut out = wb.clone();
-    out.preserved = Some(Arc::new(Preserved { parts, ..p.clone() }));
-    Some(out)
+    out
+}
+
+/// The target a workbook saved in `folder` writes for a link to the workbook at `source`:
+/// relative to `folder` with forward slashes, the same text on every system, or a `file:///`
+/// address when no relative path exists (another drive). Both paths are absolute. Text only:
+/// neither is opened or tested for.
+pub fn link_target(source: &Path, folder: &Path) -> Option<String> {
+    let name = source.file_name()?.to_string_lossy();
+    rebase(&encode_name(&name), &Folder::of(source.parent()?)?, &Folder::of(folder)?)
+}
+
+/// Whether a link's `target`, as written in a workbook in `folder`, names the file at `file`,
+/// by the text of the two alone (nothing is opened or tested for). A target from another system
+/// (`file:///C:/…` on Linux) names nothing here.
+pub fn link_names(target: &str, folder: &Path, file: &Path) -> bool {
+    let (Some(at), Some(name)) = (file.parent().and_then(Folder::of), file.file_name().map(|n| n.to_string_lossy().into_owned())) else {
+        return false;
+    };
+    let named = if is_relative_path(target) {
+        Folder::of(folder).and_then(|from| {
+            let mut names = from.names;
+            for seg in target.split(['/', '\\']) {
+                match seg {
+                    "" | "." => {}
+                    ".." => {
+                        names.pop()?;
+                    }
+                    _ => names.push(decode_name(seg)),
+                }
+            }
+            let file = names.pop()?;
+            Some((Folder { root: from.root, names }, file))
+        })
+    } else {
+        // `file:///C:\folder\Book.xlsx`, `file:////home/me/Book.xlsx`: the path as it is.
+        target.strip_prefix("file:///").and_then(|rest| {
+            let path = [rest.to_string(), format!("/{rest}")].into_iter().map(std::path::PathBuf::from).find(|p| p.is_absolute())?;
+            Some((Folder::of(path.parent()?)?, path.file_name()?.to_string_lossy().into_owned()))
+        })
+    };
+    let same = |a: &str, b: &str| if cfg!(windows) { a.eq_ignore_ascii_case(b) } else { a == b };
+    named.is_some_and(|(folder, file)| {
+        same(&file, &name)
+            && folder.root.eq_ignore_ascii_case(&at.root)
+            && folder.names.len() == at.names.len()
+            && folder.names.iter().zip(&at.names).all(|(a, b)| same(a, b))
+    })
 }
 
 /// An absolute folder, lexically normalized.
@@ -223,7 +282,7 @@ fn is_relative_path(target: &str) -> bool {
 
 /// A folder name as a segment of a relationship target (a URI): ASCII characters a URI path
 /// can't hold are percent-encoded, other characters are written as they are.
-fn encode_name(name: &str) -> String {
+pub(super) fn encode_name(name: &str) -> String {
     let mut s = String::with_capacity(name.len());
     for c in name.chars() {
         if !c.is_ascii() || c.is_ascii_alphanumeric() || "-._~!$&'()+,;=@".contains(c) {
@@ -236,7 +295,7 @@ fn encode_name(name: &str) -> String {
 }
 
 /// A target segment with its percent-escapes decoded; as written when they don't decode to UTF-8.
-fn decode_name(seg: &str) -> String {
+pub(super) fn decode_name(seg: &str) -> String {
     let b = seg.as_bytes();
     let mut out = Vec::with_capacity(b.len());
     let mut i = 0;

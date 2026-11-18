@@ -83,6 +83,36 @@ pub(super) fn in_cell_editor(app: &mut SheetApp, ui: &mut egui::Ui, geo: &Geo, s
     ui.ctx().data_mut(|d| d.insert_temp(egui::Id::unique("gridcraft.cell_editor.rect"), erect));
 }
 
+/// A formula that went to another window for its references is still shown in its cell here,
+/// as the in-cell editor showed it, until it comes back or is entered: the cell would otherwise
+/// look as if what was typed was gone. Not an editor: the keyboard is in the other window.
+pub(super) fn draft_gone_away(app: &SheetApp, ui: &egui::Ui, geo: &Geo, sh: &Sheet, wb: &Workbook) {
+    let Some(ed) = app.draft_gone_away().filter(|ed| app.view_key() == Some((ed.doc, ed.sheet))) else { return };
+    let cell = ed.cell;
+    let rect = match sh.merge_at(cell) {
+        Some(m) => geo.range_rect(sh, m),
+        None => geo.cell_rect(sh, cell),
+    };
+    if rect.width() <= 0.0 || rect.height() <= 0.0 || geo.hidden_under_frozen(sh, cell) {
+        return;
+    }
+    let st = wb.styles.get(sh.style_id(cell)).clone();
+    let size = st.font.size * 96.0 / 72.0 * geo.z;
+    let font = FontId::new(size, theme::cell_family(&st.font.name, st.font.bold, st.font.italic));
+    let fill = match st.fill.pattern {
+        PatternType::Solid => st.fill.fg.resolve(&wb.theme).map(theme::color32).unwrap_or(Color32::WHITE),
+        _ => Color32::WHITE,
+    };
+    let text = ui.painter().layout_no_wrap(ed.text.lines().next().unwrap_or("").to_string(), font, ink_on(fill));
+    let width = editor_width(text.size().x, rect.width(), size).min(geo.cells.right() - rect.left());
+    let erect = geo.mirror_rect(Rect::from_min_size(rect.min, vec2(width, rect.height())));
+    let painter = ui.painter().with_clip_rect(ui.clip_rect().intersect(geo.cells));
+    painter.rect_filled(erect, 0.0, fill);
+    painter.rect_stroke(erect.expand(1.0), 0.0, Stroke::new(2.0, Tokens::get(ui.ctx()).sel_border), StrokeKind::Middle);
+    let at = pos2(erect.left() + 2.0, erect.center().y - text.size().y * 0.5);
+    painter.with_clip_rect(erect.intersect(geo.cells)).galley(at, text, Color32::PLACEHOLDER);
+}
+
 /// Test the popup itself, not whether the pointer is over any part of the app.
 /// A trigger can sit outside its popup, so its opening click must be ignored.
 pub(super) fn popup_dismissed(response: &egui::Response, was_open: bool) -> bool {

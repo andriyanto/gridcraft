@@ -447,6 +447,8 @@ pub(crate) fn commit<R>(d: &mut DocState, f: impl FnOnce(&mut Ctx) -> Result<R>)
     if let Some(log) = d.edits.as_mut() {
         log.extend(edits);
     }
+    // A formula that reads another workbook may have come in (`book_links`).
+    d.links.note_changed(&wb, &changed);
     if changed.len() <= 200_000 {
         fit_rows.extend(changed.iter().map(|(s, c)| (*s, c.row)));
     }

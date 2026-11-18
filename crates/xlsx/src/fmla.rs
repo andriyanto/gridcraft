@@ -15,7 +15,8 @@ pub fn to_file(f: &Formula) -> String {
 }
 
 /// Whether [`expr_to_file`] would change anything in `e`: a LET or LAMBDA (parameter prefixes),
-/// a function with a file prefix, a spill, `@` or trim operator, or a structured reference.
+/// a function with a file prefix, a spill, `@` or trim operator, a structured reference, or a
+/// reference into another workbook.
 fn needs_file_spelling(e: &Expr) -> bool {
     let mut found = false;
     e.walk(&mut |x| {
@@ -23,6 +24,8 @@ fn needs_file_spelling(e: &Expr) -> bool {
             Expr::Call(name, _) => name == "LET" || name == "LAMBDA" || crate::tables::file_function_name(name).is_some(),
             Expr::Unary(gridcraft_formula::UnOp::Spill | gridcraft_formula::UnOp::At | gridcraft_formula::UnOp::Trim(_), _) => true,
             Expr::Struct(_) => true,
+            // Another workbook is a number in a file.
+            Expr::Ref(r) => r.sheet.as_external().is_some(),
             _ => false,
         }
     });
@@ -121,6 +124,16 @@ fn expr_to_file(e: Expr) -> String {
                 other => other,
             }],
         ),
+        // A file names another workbook by the number of its link (`[1]Sheet1!A1`), which the
+        // workbook being written gives out.
+        Expr::Ref(mut r) => {
+            if let gridcraft_formula::SheetSel::External(book) = &mut r.sheet
+                && let Some(n) = crate::passthrough::links::number_of(&book.0, &book.1)
+            {
+                book.0 = n.to_string();
+            }
+            Expr::Ref(r)
+        }
         // Nor the `[@Col]` shorthand: files spell it `[[#This Row],[Col]]`, or Excel repairs
         // the file and drops the table. Carried as a name, which prints verbatim.
         Expr::Struct(st) => Expr::Name(gridcraft_formula::printer::struct_ref_file(&st)),

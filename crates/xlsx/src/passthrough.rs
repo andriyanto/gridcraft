@@ -16,8 +16,11 @@
 //!   drawings, charts, tables, PivotTables, comments, slicers…) is not kept: it would point at
 //!   content that no longer exists in the same form.
 //! - External relationship targets (the path of a linked workbook) are kept as text and never
-//!   opened, followed or refreshed. A relative path to a linked workbook is rewritten when the
+//!   opened or followed. A relative path to a linked workbook is rewritten when the
 //!   workbook is saved into another folder ([`rebase_links`]), so it still names the same file.
+//! - A link to another workbook is also read into the model ([`links`]), which is what formulas
+//!   calculate from. Its part still goes back as it was, unless the link's values or its path
+//!   changed; then those are rewritten in it.
 //! - Sheet content lives on the sheet: deleting the sheet drops it, Copy Sheet doesn't copy it.
 //!   Cell references inside kept parts (a control's linked cell, a query table's range, a cell
 //!   mapped to an XML element) are kept as they were, not adjusted to inserted or deleted rows.
@@ -42,12 +45,13 @@ use crate::read::Ctx;
 use crate::write::{NS_REL, Out, Rels, XML_DECL};
 use crate::xml::{self, esc_attr};
 
+pub(crate) mod links;
 mod read;
 mod rebase;
 mod write;
 
 pub use read::KeptReader;
-pub use rebase::{SheetKept, rebase_links};
+pub use rebase::{SheetKept, link_names, link_target, rebase_links};
 #[cfg(test)]
 pub(crate) use write::sheet_names_in;
 pub use write::{KeptOut, SheetIds, WorkbookKept, workbook_elements, write_package_rels, write_workbook};

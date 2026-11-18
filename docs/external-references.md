@@ -215,7 +215,8 @@ What keeps this safe when the path came from someone else's file:
   can't: they read no file (`io::ScriptSandbox`). When a workbook with sources that are not
   open is opened, a bar under the ribbon says its values are the ones the file saved and leads
   to Edit Links; that is where Excel asks whether to update, and here nothing is read on the
-  way.
+  way. Opening such a file no longer raises a warning for the links that are read into the
+  model; a link that is not (DDE, OLE, not understood) still does.
 - **Only a workbook.** The bytes must be a workbook (XLSX, XLSB, ODS, XLS). A text file is not
   taken in as cells, whatever it is called: a link to some other file of the computer can't
   bring its content into the workbook. A password-protected workbook is not read: open it.

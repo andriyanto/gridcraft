@@ -35,6 +35,12 @@ pub struct ExternalLink {
     /// The sheets of the source this workbook reads, with the values read.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub sheets: Vec<LinkSheet>,
+    /// For a link the workbook's file brought: its number there (`[1]Sheet1!A1`, the first of
+    /// the file's `<externalReferences>`), which the file content kept in
+    /// [`Workbook::preserved`](crate::Workbook::preserved) knows it by. `None` for a link made
+    /// here. Not in JSON, as that content is not.
+    #[serde(skip)]
+    pub number: Option<u32>,
 }
 
 /// One sheet of a source: the values this workbook has of it. A cell that is not here is blank.
@@ -48,7 +54,7 @@ pub struct LinkSheet {
 impl ExternalLink {
     /// A link to the workbook `name`, with nothing read yet.
     pub fn named(name: impl Into<String>) -> ExternalLink {
-        ExternalLink { name: name.into(), target: None, sheets: Vec::new() }
+        ExternalLink { name: name.into(), target: None, sheets: Vec::new(), number: None }
     }
 
     /// The sheet `name` of the source (names match as sheet names do, without regard to case).
@@ -67,6 +73,25 @@ impl ExternalLink {
         }
         self.sheets.push(LinkSheet { name: name.to_string(), cells: BTreeMap::new() });
         true
+    }
+
+    /// Forgets the sheet `name`: the source has none (a reference into it is `#REF!`).
+    pub fn forget(&mut self, name: &str) {
+        self.sheets.retain(|s| !gridcraft_formula::same_name(&s.name, name));
+    }
+
+    /// Drops the values kept for `range` of the sheet `name`, before they are read again.
+    pub fn clear(&mut self, name: &str, range: RangeRef) {
+        let Some(sheet) = self.sheets.iter_mut().find(|s| gridcraft_formula::same_name(&s.name, name)) else { return };
+        let gone: Vec<CellRef> = sheet.cells_in(range).map(|(cell, _)| cell).collect();
+        for cell in gone {
+            sheet.cells.remove(&cell);
+        }
+    }
+
+    /// Whether this link and `other` know the same sheets with the same values, in any order.
+    pub fn same_values(&self, other: &ExternalLink) -> bool {
+        self.sheets.len() == other.sheets.len() && self.sheets.iter().all(|s| other.sheet(&s.name).is_some_and(|o| o.cells == s.cells))
     }
 
     /// How many values the link keeps.

@@ -276,12 +276,18 @@ fn adjust_ref(r: Reference, edit: &Edit) -> Option<Reference> {
 
 /// Renames the workbook `old` to `new` in references into it (`[old]Sheet1!A1`).
 pub fn rename_book(e: Expr, old: &str, new: &str) -> Expr {
+    rename_books(e, &|book| crate::same_name(book, old).then(|| new.to_string()))
+}
+
+/// Renames workbooks in references into them: `to` gives the new name of each, or `None` for
+/// one that keeps its name.
+pub fn rename_books(e: Expr, to: &dyn Fn(&str) -> Option<String>) -> Expr {
     e.map(&mut |x| match x {
         Expr::Ref(mut r) => {
             if let SheetSel::External(book) = &mut r.sheet
-                && crate::same_name(&book.0, old)
+                && let Some(new) = to(&book.0)
             {
-                book.0 = new.to_string();
+                book.0 = new;
             }
             Expr::Ref(r)
         }

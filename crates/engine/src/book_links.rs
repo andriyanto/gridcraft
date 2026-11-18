@@ -109,16 +109,29 @@ fn needs_of(wb: &Workbook) -> Vec<Need> {
     needs
 }
 
-/// What a reader keeps of the open workbook `source` for `needs` (all of one workbook): the
-/// sheets named that the source has, and the values of the cells read that are not blank. A
-/// whole column or row reads the used part of the sheet. Past the link's limits no more is
-/// taken in.
-fn copy_of(source: &Workbook, name: &str, target: Option<String>, needs: &[&Need]) -> ExternalLink {
-    let mut link = ExternalLink { name: name.to_string(), target, sheets: Vec::new() };
+/// What a reader keeps of the open workbook `source` for `needs` (all of one workbook), after
+/// what it kept before (`had`): the sheets named that the source has, and the values of the
+/// cells read that are not blank. A whole column or row reads the used part of the sheet. Past
+/// the link's limits no more is taken in.
+///
+/// A link made here is built again from the needs, so it holds what the formulas read now and
+/// nothing they once read. A link the workbook's file brought is brought up to date where the
+/// formulas read it and otherwise left as the file had it: its values may serve formulas that
+/// are not looked through here (a chart's, a conditional format's).
+fn copy_of(source: &Workbook, had: &ExternalLink, needs: &[&Need]) -> ExternalLink {
+    let from_file = had.number.is_some();
+    let mut link = ExternalLink { sheets: if from_file { had.sheets.clone() } else { Vec::new() }, ..had.clone() };
     for need in needs {
-        let Some(sheet) = source.sheet_index(&need.sheet).and_then(|i| source.sheet(i)) else { continue };
+        let Some(sheet) = source.sheet_index(&need.sheet).and_then(|i| source.sheet(i)) else {
+            // The source has no such sheet (any more): a reference into it is `#REF!`.
+            link.forget(&need.sheet);
+            continue;
+        };
         if !link.touch(&sheet.name) {
             continue;
+        }
+        if from_file {
+            link.clear(&sheet.name, need.range);
         }
         let Some(range) = sheet.used_range().and_then(|used| used.intersection(&need.range)) else { continue };
         for (at, cell) in sheet.cells.iter_range(range) {
@@ -128,6 +141,11 @@ fn copy_of(source: &Workbook, name: &str, target: Option<String>, needs: &[&Need
         }
     }
     link
+}
+
+/// The file an open document is, when it has one.
+fn file_of(d: &DocState) -> Option<std::path::PathBuf> {
+    d.path.as_deref().and_then(crate::io::source_path)
 }
 
 impl Session {
@@ -173,6 +191,46 @@ impl Session {
         }
     }
 
+    /// The open workbook the name `book` stands for in the formulas of the document `reader`:
+    /// the one whose window shows that name. When several do (the same file name in two
+    /// folders), the one the reader's link names by its target.
+    fn source_of(&self, reader: usize, book: &str) -> Option<&DocState> {
+        let mut named = self.docs.iter().enumerate().filter(|(i, s)| *i != reader && same_name(&s.display_title(), book)).map(|(_, s)| s);
+        let first = named.next()?;
+        let Some(second) = named.next() else { return Some(first) };
+        let d = self.docs.get(reader)?;
+        let target = gridcraft_model::links::find(&d.wb.links, book).and_then(|l| l.target.as_deref());
+        let (Some(target), Some(folder)) = (target, d.wb.source_dir.as_deref()) else { return Some(first) };
+        let is_target = |s: &&DocState| file_of(s).is_some_and(|file| gridcraft_xlsx::link_names(target, folder, &file));
+        [first, second].into_iter().chain(named).find(is_target).or(Some(first))
+    }
+
+    /// The workbook of the document `doc` as a file at `path` holds it, when that is not the
+    /// workbook as it is: the paths of its links are written from the folder of that file.
+    /// A relative path follows the workbook into another folder
+    /// ([`gridcraft_xlsx::rebase_links`]), and a linked workbook that is open here and has a
+    /// file is where that file is now. Paths are text: nothing is opened or tested for.
+    pub(crate) fn for_file(&self, doc: usize, path: &str) -> Option<Workbook> {
+        let d = self.docs.get(doc)?;
+        let folder = crate::io::source_dir(path)?;
+        let mut out = gridcraft_xlsx::rebase_links(&d.wb, &folder);
+        let mut links = out.as_ref().map_or(&d.wb.links, |wb| &wb.links).clone();
+        let mut changed = false;
+        for link in links.iter_mut() {
+            let Some(target) = self.source_of(doc, &link.name).and_then(file_of).and_then(|file| gridcraft_xlsx::link_target(&file, &folder)) else {
+                continue;
+            };
+            if link.target.as_deref() != Some(target.as_str()) {
+                Arc::make_mut(link).target = Some(target);
+                changed = true;
+            }
+        }
+        if changed {
+            out.get_or_insert_with(|| (*d.wb).clone()).links = links;
+        }
+        out
+    }
+
     /// Updates the copies one workbook keeps. Whether anything changed; `None` when its
     /// recalculation was asked to stop.
     fn sync_reader(&mut self, reader: usize) -> Option<bool> {
@@ -194,8 +252,7 @@ impl Session {
                 books.push(&need.book);
             }
         }
-        // The open workbook each name stands for, by the name its window shows.
-        let source_of = |book: &str| self.docs.iter().enumerate().find(|(i, s)| *i != reader && same_name(&s.display_title(), book)).map(|(_, s)| s);
+        let source_of = |book: &str| self.source_of(reader, book);
         let from: Vec<(String, Option<Weak<Workbook>>)> =
             books.iter().map(|b| (b.to_string(), source_of(b).map(|s| Arc::downgrade(&s.wb)))).collect();
         let same = |a: &Option<Weak<Workbook>>, b: &Option<Weak<Workbook>>| match (a, b) {
@@ -220,11 +277,8 @@ impl Session {
                 (None, _) => {}
                 (Some(source), at) => {
                     let needs: Vec<&Need> = d.links.needs.iter().filter(|n| same_name(&n.book, book)).collect();
-                    let (name, target) = match at.and_then(|a| links.get(a)) {
-                        Some(link) => (link.name.clone(), link.target.clone()),
-                        None => (book.to_string(), None),
-                    };
-                    let copy = copy_of(&source.wb, &name, target, &needs);
+                    let had = at.and_then(|a| links.get(a)).map(|link| (**link).clone()).unwrap_or_else(|| ExternalLink::named(*book));
+                    let copy = copy_of(&source.wb, &had, &needs);
                     let room = links.len() < gridcraft_model::links::MAX_LINKS;
                     match at.and_then(|a| links.get_mut(a)) {
                         Some(link) if **link == copy => {}
@@ -270,31 +324,7 @@ fn rename_in(reader: &mut DocState, old: &str, new: &str) {
     for link in wb.links.iter_mut().filter(|l| same_name(&l.name, old)) {
         Arc::make_mut(link).name = new.to_string();
     }
-    for si in 0..wb.sheets.len() {
-        let formulas: Vec<_> = wb
-            .sheets
-            .get(si)
-            .map(|s| s.cells.iter().filter_map(|(c, cell)| cell.formula.clone().filter(|f| may_read(&f.text)).map(|f| (c, f))).collect())
-            .unwrap_or_default();
-        let Some(sheet) = wb.sheet_mut(si) else { continue };
-        for (at, formula) in formulas {
-            let renamed = formula.with_expr(|e| Some(gridcraft_formula::adjust::rename_book(e.clone(), old, new)).filter(|ne| ne != e));
-            if let Some(Some(e)) = renamed
-                && let Some(cell) = sheet.cells.get_mut(at)
-            {
-                cell.formula = Some(Arc::new(gridcraft_model::Formula {
-                    array: formula.array,
-                    dynamic: formula.dynamic,
-                    ..gridcraft_model::Formula::from_expr(e)
-                }));
-            }
-        }
-    }
-    for name in wb.names.iter_mut().filter(|n| may_read(&n.formula)) {
-        if let Ok(e) = gridcraft_formula::parse_name(&name.formula) {
-            name.formula = gridcraft_formula::print(&gridcraft_formula::adjust::rename_book(e, old, new));
-        }
-    }
+    wb.rename_books(&|book| same_name(book, old).then(|| new.to_string()));
     // Formulas changed their text, not what they read: the graph is built again and nothing
     // needs calculating for it.
     reader.calc.rebuild(&wb);

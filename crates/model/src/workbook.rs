@@ -442,6 +442,45 @@ impl Workbook {
     pub fn name_call_case(&self, e: Expr) -> Expr {
         spell_calls(e, &self.lambda_names())
     }
+    /// Renames other workbooks in the cell formulas and defined names that read them
+    /// (`[old]Sheet1!A1`): `to` gives the new name of each, or `None` for one that keeps its
+    /// name. Whether a formula changed. The links themselves are the caller's to rename.
+    pub fn rename_books(&mut self, to: &dyn Fn(&str) -> Option<String>) -> bool {
+        // A reference into another workbook has the brackets and the `!`: nothing else is parsed.
+        let may_read = |text: &str| text.contains('[') && text.contains('!');
+        let mut any = false;
+        for sheet in self.sheets.iter_mut() {
+            let renamed: Vec<_> = sheet
+                .cells
+                .iter()
+                .filter_map(|(c, cell)| {
+                    let f = cell.formula.as_ref().filter(|f| may_read(&f.text))?;
+                    let ne = f.with_expr(|e| Some(gridcraft_formula::adjust::rename_books(e.clone(), to)).filter(|ne| ne != e))??;
+                    Some((c, Formula { array: f.array, dynamic: f.dynamic, ..Formula::from_expr(ne) }))
+                })
+                .collect();
+            if renamed.is_empty() {
+                continue;
+            }
+            any = true;
+            let sheet = Arc::make_mut(sheet);
+            for (c, f) in renamed {
+                if let Some(cell) = sheet.cells.get_mut(c) {
+                    cell.formula = Some(Arc::new(f));
+                }
+            }
+        }
+        for n in self.names.iter_mut().filter(|n| may_read(&n.formula)) {
+            if let Ok(e) = gridcraft_formula::parse_name(&n.formula) {
+                let ne = gridcraft_formula::adjust::rename_books(e.clone(), to);
+                if ne != e {
+                    n.formula = gridcraft_formula::print(&ne);
+                    any = true;
+                }
+            }
+        }
+        any
+    }
     /// [`Workbook::name_call_case`] for every cell formula and defined name (after reading a
     /// file).
     pub fn apply_name_call_case(&mut self) {

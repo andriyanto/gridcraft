@@ -1,13 +1,4 @@
 <p align="center">
-  <a href="https://getartcraft.com/">
-    <picture>
-      <source media="(prefers-color-scheme: dark)" srcset="docs/brand/artcraft-logo-white.svg">
-      <img alt="ArtCraft" src="docs/brand/artcraft-logo.svg" width="200">
-    </picture>
-  </a>
-</p>
-
-<p align="center">
   <img src="assets/app-icon/hicolor/256x256/apps/ai.storyteller.gridcraft.png" width="128" height="128" alt="GridCraft icon: a spreadsheet page on a green tile">
 </p>
 
@@ -20,17 +11,22 @@
 <p align="center">
   A fast, open-source, clean-room take on modern spreadsheet workflows. It runs natively on macOS,
   Windows, Linux and BSD, and in the browser via WebAssembly.<br>
-  <i>By the ArtCraft team.</i>
+  <i>Based on GridCraft by the ArtCraft team.</i>
 </p>
+
+> [!IMPORTANT]
+> **This repository is an independently maintained, modified copy of GridCraft.** The original
+> project is [`storytold/gridcraft`](https://github.com/storytold/gridcraft) by the ArtCraft team.
+> Builds made from this repository are made by [@andriyanto](https://github.com/andriyanto), not
+> by the ArtCraft team, which does not endorse or support them. **No release has been published
+> from this repository yet, and its builds are not code-signed**: see [Downloads](#downloads),
+> [Code signing policy](#code-signing-policy) and [Privacy](#privacy).
 
 <p align="center">
   <img alt="Written in Rust" src="https://img.shields.io/badge/written%20in-Rust-147a40?style=flat-square&logo=rust&logoColor=white">
   <img alt="Runs on macOS, Windows, Linux, BSD and the web" src="https://img.shields.io/badge/runs%20on-macOS%20%C2%B7%20Windows%20%C2%B7%20Linux%20%C2%B7%20BSD%20%C2%B7%20Web-1f9d55?style=flat-square">
   <img alt="License: MIT OR Apache-2.0" src="https://img.shields.io/badge/license-MIT%20%2F%20Apache--2.0-147a40?style=flat-square">
   <img alt="Agent-drivable over MCP" src="https://img.shields.io/badge/agents-MCP-1f9d55?style=flat-square">
-  <br>
-  <a href="https://sonarcloud.io/project/overview?id=storytold_gridcraft"><img alt="Scanned by SonarCloud" src="https://img.shields.io/badge/Scanned_by-SonarCloud-4b9fd5?style=flat-square&logo=sonarqubecloud&logoColor=white"></a>
-  <a href="https://coderabbit.ai"><img alt="Reviewed by CodeRabbit" src="https://img.shields.io/coderabbit/prs/github/storytold/gridcraft?style=flat-square&label=Reviewed%20by%20CodeRabbit&logo=coderabbit"></a>
 </p>
 
 <p align="center">
@@ -213,18 +209,26 @@ numbers and estimates are in [ROADMAP.md](ROADMAP.md); the ranked work list is [
 
 ## Downloads
 
-**Download GridCraft** from GitHub: the [latest release](https://github.com/storytold/gridcraft/releases/latest) has every build listed below, and [all releases](https://github.com/storytold/gridcraft/releases) has earlier versions and their notes. `<ver>` in the file names is the version number, and `SHA256SUMS.txt` lists a checksum for every file.
+**No release has been published from this repository yet.** When there is one, it will be on the
+[releases page](https://github.com/andriyanto/gridcraft/releases), the page the app opens for a
+new version. Until then:
 
-### Windows
+- **Build it from source**: see [Quick start](#quick-start).
+- **Windows on ARM64 test builds** are made by a GitHub Actions workflow of this repository
+  ([`windows-arm64.yml`](.github/workflows/windows-arm64.yml)) when the maintainer starts it.
+  The MSI is kept with that run as the artifact `gridcraft-windows-arm64` for a few days, and
+  GitHub asks you to sign in to download it. These are test builds, not releases.
 
-| Build | Installer | Portable |
-|---|---|---|
-| x64 (64-bit Intel/AMD) | `gridcraft-<ver>-windows-x64.msi` | `gridcraft-<ver>-windows-x64-portable.zip` |
-| arm64 (Snapdragon and other ARM PCs) | `gridcraft-<ver>-windows-arm64.msi` | `gridcraft-<ver>-windows-arm64-portable.zip` |
-| x86 (32-bit) | `gridcraft-<ver>-windows-x86.msi` | `gridcraft-<ver>-windows-x86-portable.zip` |
+Builds made from this repository are **not code-signed**
+([Code signing policy](#code-signing-policy)): Windows SmartScreen and macOS Gatekeeper warn
+before the first start. The app tells you about a new release but never installs it itself, on
+any system: **Download** in that prompt, and **Automate ▸ Download Latest…** at any time, open
+the releases page in your browser, and you download and run the new version yourself.
 
-Installers and executables are code-signed. The MSI installer offers an optional desktop shortcut
-(unchecked on a new installation).
+The original project's signed builds, for every system it supports, are on
+[its own releases page](https://github.com/storytold/gridcraft/releases).
+
+### Windows troubleshooting
 
 **If the app doesn't open on Windows:** the desktop app initializes only DirectX 12 by default.
 Letting wgpu also create an OpenGL instance can crash some graphics drivers (AMD's
@@ -253,35 +257,6 @@ DirectX 12 shaders are compiled with FXC, which is part of Windows, so no `dxcom
 `dxil.dll` is needed, and a copy another program put on `PATH` can no longer stop the app at start
 ("Parent device is lost", #339). `$env:WGPU_DX12_COMPILER = "dxc"` (or `"auto"`) selects wgpu's DXC
 handling again for troubleshooting.
-
-### macOS
-
-| Build | File | Notes |
-|---|---|---|
-| App, universal (Apple silicon + Intel) | `gridcraft-<ver>-macos-universal.dmg` | Signed and notarized |
-| Command-line tool, universal | `gridcraft-cli-<ver>-macos-universal.zip` | Signed and notarized |
-
-### Linux
-
-| Format | x86_64 | aarch64 (ARM64) | Notes |
-|---|---|---|---|
-| AppImage | `gridcraft-<ver>-linux-x86_64.AppImage` | `gridcraft-<ver>-linux-aarch64.AppImage` | Runs anywhere; updates itself with [AppImageUpdate](https://github.com/AppImageCommunity/AppImageUpdate) (`.zsync` files) |
-| Flatpak | `gridcraft-<ver>-linux-x86_64.flatpak` | `gridcraft-<ver>-linux-aarch64.flatpak` | Sandboxed; `flatpak install --user <file>` |
-| Debian/Ubuntu | `gridcraft-<ver>-linux-x86_64.deb` | `gridcraft-<ver>-linux-aarch64.deb` | |
-| Fedora/RHEL/openSUSE | `gridcraft-<ver>-linux-x86_64.rpm` | `gridcraft-<ver>-linux-aarch64.rpm` | |
-| Tarball | `gridcraft-<ver>-linux-x86_64.tar.gz` | `gridcraft-<ver>-linux-aarch64.tar.gz` | Unpack anywhere |
-
-### FreeBSD
-
-| Build | File |
-|---|---|
-| x86_64 | `gridcraft-<ver>-freebsd-x86_64.tar.gz` |
-
-### Web (WebAssembly)
-
-| Build | File | Notes |
-|---|---|---|
-| Static site | `gridcraft-web-<ver>.zip` | Runs in a modern browser; host it on any static server |
 
 ## The Crafting Apps
 
@@ -332,6 +307,50 @@ And [**ArtCraft**](https://getartcraft.com/) itself, our AI image and video stud
   <a href="https://getartcraft.com/apps/gridcraft">GridCraft</a>
 </p>
 
+## Privacy
+
+GridCraft has no accounts, no telemetry, no analytics and no crash reporting. Your workbooks and
+the [log file](#logs) stay on your computer, and nothing in them is sent anywhere. A formula that
+reads another workbook reads a file on your computer only, and only when you ask it to; the
+`WEBSERVICE` function is not available and fetches nothing.
+
+A desktop build made from this repository connects to the network in these cases only:
+
+| When | Where | What is sent |
+|---|---|---|
+| Each time the desktop app starts, and when you choose **Automate ▸ Check for Updates…** | GitHub (`api.github.com`): the list of releases of `andriyanto/gridcraft` | One request for that list, labelled `GridCraft/Update`. Nothing about you, your computer or your workbooks. Like any web request, it shows GitHub your IP address. |
+| When you press **Download** in the update prompt, or choose **Automate ▸ Download Latest…** | Your web browser opens the releases page on GitHub. The app downloads and installs nothing itself | Whatever your browser sends. |
+| When you click a link in a cell or in the About window | Your web browser opens the address | Whatever your browser sends. |
+
+There is no setting yet that turns off the update check at start. Printing goes through the
+printers your system has set up. The control channel runs only when you start it and accepts
+connections from the same computer only (`127.0.0.1`); the MCP server talks to the program that
+started it, over its standard input and output.
+
+GitHub handles those requests under its own policy, the
+[GitHub General Privacy Statement](https://docs.github.com/en/site-policy/privacy-policies/github-general-privacy-statement).
+The maintainer of this repository receives no data from the app.
+
+## Code signing policy
+
+**Status: builds made from this repository are not code-signed, and none has been published as a
+release.** Windows installers and executables carry no signature.
+
+How changes and builds are made:
+
+- Since this copy was made, every change has reached `main` through a pull request. Many are
+  prepared with an AI coding agent (Claude), and the commits say so; the maintainer reviews and
+  merges each one.
+- Test builds are made by GitHub Actions in this repository, from a commit in this repository.
+  Nothing built on a personal computer is published.
+
+Team roles:
+
+- Committers and reviewers: [@andriyanto](https://github.com/andriyanto)
+- Approvers: [@andriyanto](https://github.com/andriyanto)
+
+What these builds send over the network is described under [Privacy](#privacy).
+
 ## License and credits
 
 GridCraft is dual-licensed under [MIT](LICENSE-MIT) or [Apache-2.0](LICENSE-APACHE), at your option.
@@ -345,13 +364,12 @@ this README were made with GridCraft itself. GridCraft bundles no fonts: it uses
 installed on your system.
 
 The ArtCraft name, wordmark and logos in [`docs/brand/`](docs/brand/) are trademarks of the
-ArtCraft Team and are not covered by this license. They may be used only unmodified, and only as
-part of this repository and GridCraft, under [`docs/brand/LICENSE-brand.txt`](docs/brand/LICENSE-brand.txt).
-Forks and modified versions must remove them.
+ArtCraft Team and are not covered by this license; their terms are in
+[`docs/brand/LICENSE-brand.txt`](docs/brand/LICENSE-brand.txt). This modified copy does not show
+them: it is based on GridCraft by the ArtCraft team, and is not an ArtCraft product.
 
 <br>
 
 <p align="center">
-  <a href="https://getartcraft.com/"><img alt="ArtCraft" src="docs/brand/artcraft-mark.svg" width="28"></a><br>
-  <sub>Made by the <a href="https://getartcraft.com/">ArtCraft</a> team and community.</sub>
+  <sub>Based on GridCraft, made by the <a href="https://getartcraft.com/">ArtCraft</a> team and community.</sub>
 </p>

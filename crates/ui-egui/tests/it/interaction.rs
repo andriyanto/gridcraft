@@ -699,6 +699,21 @@ fn select_data_dialog_sets_the_category_axis_labels() {
 }
 
 #[test]
+fn about_says_where_this_copy_comes_from() {
+    let mut h = harness(blank());
+    h.state_mut().open_dialog("about", json!({}));
+    h.run_steps(3);
+    for line in [
+        "Get this build: github.com/andriyanto/gridcraft/releases",
+        "Source code of this build: github.com/andriyanto/gridcraft",
+        "Source code: github.com/storytold/gridcraft",
+        "Disclaimer: this copy of GridCraft has been modified from the original. It is not an official ArtCraft release.",
+    ] {
+        assert!(h.query_by_label(line).is_some(), "About shows: {line}");
+    }
+}
+
+#[test]
 /// Each listed dialog opens, passes accessibility and closes.
 fn dialogs_open_and_close() {
     let mut h = harness(blank());

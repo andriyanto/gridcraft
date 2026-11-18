@@ -134,7 +134,7 @@ fn formula(wb: &Workbook, a1: &str) -> String {
 #[test]
 fn a_link_of_the_file_is_read_into_the_model_and_formulas_name_it() {
     let (wb, rep) = read_xlsx(&budget_package()).unwrap();
-    assert!(!rep.warnings.iter().any(|w| w.contains("dropped")), "{:?}", rep.warnings);
+    assert!(!rep.warnings.iter().any(|w| w.contains("link")), "a link that is read is nothing to warn about: {:?}", rep.warnings);
     let [link] = wb.links.as_slice() else { panic!("one link, got {:?}", wb.links) };
     assert_eq!((link.name.as_str(), link.target.as_deref(), link.number), ("Budget Plan.xlsx", Some(TARGET), Some(1)));
     // The sheets it has values of: the one whose last update failed is not among them.
@@ -300,7 +300,8 @@ fn a_link_no_formula_reads_is_not_written() {
 fn kept_links_keep_their_numbers_and_links_made_here_follow() {
     // 1: a DDE link (not a workbook), 2: a workbook, then two made here.
     let cells = r#"<row r="1"><c r="A1"><f>[2]Sheet1!$A$1</f><v>7</v></c><c r="B1"><f>[1]!'item'</f><v>3</v></c></row>"#;
-    let (mut wb, _) = read_xlsx(&package(&[(DDE, None), (BUDGET, Some(TARGET))], cells, "")).unwrap();
+    let (mut wb, rep) = read_xlsx(&package(&[(DDE, None), (BUDGET, Some(TARGET))], cells, "")).unwrap();
+    assert!(rep.warnings.iter().any(|w| w.starts_with("1 link to other sources")), "the one that is not read is said: {:?}", rep.warnings);
     assert_eq!(wb.links.iter().map(|l| (l.name.as_str(), l.number)).collect::<Vec<_>>(), [("Budget Plan.xlsx", Some(2))]);
     assert_eq!(formula(&wb, "A1"), "'[Budget Plan.xlsx]Sheet1'!$A$1");
     let set = |wb: &mut Workbook, a1: &str, f: &str| {

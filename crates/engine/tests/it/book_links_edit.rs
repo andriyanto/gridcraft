@@ -1,5 +1,6 @@
-//! Data › Edit Links (`docs/external-references.md`, stage B): the list of the workbooks a
-//! workbook reads, Change Source and Break Link.
+//! Data › Edit Links (`docs/external-references.md`, stages B and C): the list of the workbooks
+//! a workbook reads, Change Source, Break Link, and Update Values and Open Source, which read a
+//! linked workbook's file when a person asks.
 
 use std::path::{Path, PathBuf};
 
@@ -101,16 +102,19 @@ fn change_source_points_the_formulas_at_another_workbook() {
     let other = path(&dir, &["plans", "Budget 2027.xlsx"]);
     saved_book(&other, 70);
     let r = run(&mut s, "data.changeLinkSource", json!({"link": "budget.xlsx", "path": other}));
-    assert_eq!(r["name"].as_str(), Some("Budget 2027.xlsx"));
+    assert_eq!((r["name"].as_str(), r["read"].as_bool()), (Some("Budget 2027.xlsx"), Some(true)));
     assert_eq!(formula(&s, 0, "B1"), "'[Budget 2027.xlsx]Sheet1'!A1*2");
-    // Nothing is read from the file: until the workbook is open, nothing is known of it.
-    assert_eq!(value(&s, 0, "B1"), Value::Error(CellError::Ref));
+    // The file was named by the person: what the formulas read of it is read at once.
+    assert_eq!(value(&s, 0, "B1"), Value::Number(140.0));
+    assert_eq!(s.documents().len(), 1, "it is read, not opened");
     let list = links(&mut s, 0);
     assert_eq!(list.len(), 1);
-    assert_eq!((list[0]["status"].as_str(), list[0]["target"].as_str()), (Some("unknown"), Some("plans/Budget%202027.xlsx")));
-    // It opens: the formulas read it.
+    assert_eq!((list[0]["status"].as_str(), list[0]["target"].as_str()), (Some("saved"), Some("plans/Budget%202027.xlsx")));
+    // It opens: the formulas follow it.
     run(&mut s, "file.open", json!({"path": other}));
-    assert_eq!(value(&s, 0, "B1"), Value::Number(140.0));
+    set(&mut s, 1, "A1", "71");
+    assert_eq!(value(&s, 0, "B1"), Value::Number(142.0));
+    set(&mut s, 1, "A1", "70");
     // Saved and opened alone, the link is the new one, with its values.
     let again = path(&dir, &["Report 2.xlsx"]);
     s.set_active(0);
@@ -245,5 +249,97 @@ fn breaking_a_link_that_is_not_the_files_last_keeps_the_others_right() {
     // And the other way round: the file's last link goes from the file.
     run(&mut again, "data.breakLink", json!({"link": "Second.xlsx"}));
     assert!(!links(&mut again, 0).iter().any(|l| l["name"] == "Second.xlsx"));
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+/// Changes `cell` of the workbook at `file` and saves it, in a session of its own.
+fn change_file(file: &str, cell: &str, input: &str) {
+    let mut s = Session::new();
+    run(&mut s, "file.open", json!({"path": file}));
+    set(&mut s, 0, cell, input);
+    run(&mut s, "file.save", json!({"path": file}));
+}
+
+fn update(s: &mut Session, params: Json) -> Vec<(String, String, String)> {
+    let text = |r: &Json, k: &str| r[k].as_str().unwrap_or("").to_string();
+    run(s, "data.updateLinks", params).as_array().unwrap().iter().map(|r| (text(r, "name"), text(r, "status"), text(r, "message"))).collect()
+}
+
+#[test]
+fn update_values_reads_a_closed_workbooks_file_when_asked() {
+    let dir = folder("update");
+    let mut s = report_alone(&dir);
+    let budget = path(&dir, &["Budget.xlsx"]);
+    // A cell the file's link never had, and a result another workbook's formula spills.
+    set(&mut s, 0, "B2", "=[Budget.xlsx]Sheet1!A2");
+    set(&mut s, 0, "B3", "=SUM([Budget.xlsx]Sheet1!C1:C3)");
+    assert_eq!((value(&s, 0, "B2"), value(&s, 0, "B3")), (Value::Number(0.0), Value::Number(0.0)), "not known while the workbook is closed");
+    change_file(&budget, "A1", "50");
+    change_file(&budget, "C1", "=SEQUENCE(3)");
+    assert_eq!(value(&s, 0, "B1"), Value::Number(20.0), "nothing is read until it is asked for");
+    let steps = s.documents()[0].undo.len();
+    assert_eq!(update(&mut s, json!({})), [("Budget.xlsx".to_string(), "updated".to_string(), String::new())]);
+    assert_eq!((value(&s, 0, "B1"), value(&s, 0, "B2"), value(&s, 0, "B3")), (Value::Number(100.0), Value::Number(11.0), Value::Number(6.0)));
+    assert_eq!(s.documents().len(), 1, "the workbook is read, not opened");
+    assert_eq!(s.documents()[0].undo.len(), steps, "as when a source is followed: no Undo step");
+    assert!(s.documents()[0].is_dirty());
+    // Asked again with nothing new in the file, and for a workbook that is open.
+    assert_eq!(update(&mut s, json!({"link": "budget.xlsx"}))[0].1, "unchanged");
+    run(&mut s, "file.open", json!({"path": budget}));
+    s.set_active(0);
+    assert_eq!(update(&mut s, json!({}))[0].1, "open");
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn only_a_workbook_on_this_computer_is_read_and_only_when_a_person_asks() {
+    let dir = folder("refused");
+    let mut s = report_alone(&dir);
+    let failed = |s: &mut Session| {
+        let r = update(s, json!({}));
+        assert_eq!(r[0].1, "failed", "{r:?}");
+        r[0].2.clone()
+    };
+    // A script's steps read no file: a workbook's macro can't have a linked file read.
+    change_file(&path(&dir, &["Budget.xlsx"]), "A1", "50");
+    {
+        let _sandbox = gridcraft_engine::io::ScriptSandbox::enter();
+        failed(&mut s);
+    }
+    assert_eq!(value(&s, 0, "B1"), Value::Number(20.0));
+    // The file is gone.
+    std::fs::remove_file(path(&dir, &["Budget.xlsx"])).unwrap();
+    assert!(failed(&mut s).contains("Budget.xlsx"));
+    // A file that is not a workbook is not taken in as cells, whatever it is called.
+    let secret = path(&dir, &["notes.xlsx"]);
+    std::fs::write(&secret, "password,hunter2\n").unwrap();
+    let r = run(&mut s, "data.changeLinkSource", json!({"link": "Budget.xlsx", "path": secret}));
+    assert_eq!(r["read"].as_bool(), Some(false));
+    assert!(r["message"].as_str().unwrap().contains("not a workbook"), "{r}");
+    assert!(failed(&mut s).contains("not a workbook"));
+    assert_eq!(value(&s, 0, "B1"), Value::Error(CellError::Ref));
+    let text = serde_json::to_string(&*s.documents()[0].wb).unwrap();
+    assert!(!text.contains("hunter2"), "nothing of the file is in the workbook");
+    // A link that has no path (its workbook was only ever named) has nothing to read.
+    set(&mut s, 0, "C1", "=[Nowhere]Sheet1!A1");
+    let r = update(&mut s, json!({"link": "Nowhere"}));
+    assert!(r[0].1 == "failed" && r[0].2.contains("no path"), "{r:?}");
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn open_source_opens_the_linked_workbook() {
+    let dir = folder("open");
+    let mut s = report_alone(&dir);
+    let r = run(&mut s, "data.openLinkSource", json!({"link": "Budget.xlsx"}));
+    assert_eq!(r["path"].as_str(), Some(path(&dir, &["Budget.xlsx"]).as_str()));
+    assert_eq!(s.documents().len(), 2);
+    assert_eq!(s.active().map(|d| d.display_title()).as_deref(), Some("Budget.xlsx"));
+    assert_eq!(links(&mut s, 0)[0]["status"].as_str(), Some("open"));
+    // Asked again, it goes to the workbook that is open.
+    s.set_active(0);
+    let r = run(&mut s, "data.openLinkSource", json!({"link": "Budget.xlsx"}));
+    assert_eq!((r["open"].as_bool(), s.documents().len()), (Some(true), 2));
+    assert_eq!(s.active().map(|d| d.display_title()).as_deref(), Some("Budget.xlsx"));
     let _ = std::fs::remove_dir_all(&dir);
 }

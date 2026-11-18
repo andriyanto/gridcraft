@@ -17,7 +17,7 @@ use gridcraft_core::RangeRef;
 use gridcraft_formula::same_name;
 use gridcraft_model::{ExternalLink, Workbook};
 
-use crate::{DocState, Session};
+use crate::{DocState, EngineError, Result, Session};
 
 /// How many times the open workbooks are gone through for one command: a chain (C reads B reads
 /// A) settles in as many rounds as it is long, and workbooks that read each other in a loop
@@ -254,13 +254,7 @@ impl Session {
         if !d.links.may_read && d.wb.links.is_empty() {
             return Some(false);
         }
-        let mut fresh = false;
-        if !std::ptr::eq(d.links.of.as_ptr(), Arc::as_ptr(&d.wb)) || d.links.of.strong_count() == 0 {
-            d.links.needs = needs_of(&d.wb);
-            d.links.of = Arc::downgrade(&d.wb);
-            d.links.may_read = !d.links.needs.is_empty();
-            fresh = true;
-        }
+        let fresh = collect_needs(d);
         let d = self.docs.get(reader)?;
         let mut books: Vec<&str> = Vec::new();
         for need in d.links.needs.iter().filter(|n| !is_file_number(&n.book)) {
@@ -316,21 +310,131 @@ impl Session {
         if !changed {
             return Some(false);
         }
-        let mut wb = (*d.wb).clone();
-        wb.links = links;
-        // The formulas that read another workbook are calculated at every recalculation
-        // (`gridcraft_calc::precedents`), with what depends on them.
-        d.calc.cells_changed(&mut wb, &[]);
-        if d.calc.interrupt.as_ref().is_some_and(|interrupt| interrupt.was_hit()) {
-            d.calc.restore_after_stop(&d.wb, Some(&[]));
+        if !with_links(d, links) {
             d.links.from.clear();
             return None;
         }
-        d.wb = Arc::new(wb);
-        d.revision += 1;
-        // The formulas are the ones `needs` was collected from.
-        d.links.of = Arc::downgrade(&d.wb);
         Some(true)
+    }
+
+    /// Reads from its file what the formulas of the document `reader` read of the workbook
+    /// `book`, which is not open here: the values opening that workbook would show. Whether a
+    /// value changed; an error says why nothing was read.
+    ///
+    /// This is the one place a file is read because a link names it, and a person asks for it
+    /// (Update Values, Change Source to a file): never a workbook, as the path a link holds is
+    /// as hostile as the rest of its file. So:
+    /// - only a file on this computer is read: a path on another computer would make this one
+    ///   call a server the file chose;
+    /// - only a workbook is read: a text file is not taken in as cells, whatever it is called;
+    /// - it is read as any file is, with the same limits, and through [`crate::io::read_file`],
+    ///   which a script's steps can't use;
+    /// - nothing it runs: its macros are not run, and the workbooks it reads itself are not
+    ///   opened (its formulas into them calculate from what its own file saved).
+    pub(crate) fn update_link(&mut self, reader: usize, book: &str) -> Result<bool> {
+        let refused = |why: String| EngineError::Other(why);
+        if self.source_of(reader, book).is_some() {
+            return Err(refused(format!("\"{book}\" is open: its values are followed as they change")));
+        }
+        let d = self.docs.get_mut(reader).ok_or_else(|| refused("no such workbook".into()))?;
+        collect_needs(d);
+        let link = gridcraft_model::links::find(&d.wb.links, book).ok_or_else(|| refused(format!("there is no link to \"{book}\"")))?.clone();
+        let Some(target) = link.target.as_deref() else {
+            return Err(refused(format!("the link to \"{book}\" has no path: Change Source gives it one")));
+        };
+        let Some(path) = gridcraft_xlsx::link_path(target, d.wb.source_dir.as_deref()) else {
+            return Err(refused(format!("the path of \"{book}\" names no file on this computer: {target}")));
+        };
+        if !on_this_computer(&path) {
+            return Err(refused(format!("\"{}\" is on another computer: open it to read its values", path.display())));
+        }
+        let bytes = crate::io::read_file(&path.to_string_lossy())?;
+        use gridcraft_xlsx::Format;
+        match gridcraft_xlsx::sniff(&bytes) {
+            Format::Xlsx | Format::Xlsb | Format::Ods | Format::Xls => {}
+            Format::Encrypted => return Err(refused(format!("\"{}\" is protected by a password: open it to read its values", path.display()))),
+            _ => return Err(refused(format!("\"{}\" is not a workbook", path.display()))),
+        }
+        let (mut source, _) = crate::io::read_plain(&link.name, &bytes, false)?;
+        drop(bytes);
+        // As opening it would: its formulas are calculated, so what they spill is there.
+        let mut calc = gridcraft_calc::Calc::new();
+        calc.interrupt = Some(self.interrupt.clone());
+        calc.recalc_all(&mut source);
+        if self.interrupt.was_hit() {
+            return Err(EngineError::Cancelled);
+        }
+        let d = self.docs.get_mut(reader).ok_or_else(|| refused("no such workbook".into()))?;
+        let needs: Vec<&Need> = d.links.needs.iter().filter(|n| same_name(&n.book, book)).collect();
+        let copy = copy_of(&source, &link, &needs);
+        if copy == link {
+            return Ok(false);
+        }
+        let mut links = d.wb.links.clone();
+        for kept in links.iter_mut().filter(|l| same_name(&l.name, book)) {
+            *kept = Arc::new(copy.clone());
+        }
+        if !with_links(d, links) {
+            return Err(EngineError::Cancelled);
+        }
+        Ok(true)
+    }
+
+    /// The file the link to `book` of the document `reader` names, for opening it as the
+    /// person asks (Open Source): on this computer, by the link's path.
+    pub(crate) fn link_file(&self, reader: usize, book: &str) -> Result<std::path::PathBuf> {
+        let refused = |why: String| EngineError::Other(why);
+        let d = self.docs.get(reader).ok_or_else(|| refused("no such workbook".into()))?;
+        let link = gridcraft_model::links::find(&d.wb.links, book).ok_or_else(|| refused(format!("there is no link to \"{book}\"")))?;
+        let target = link.target.as_deref().ok_or_else(|| refused(format!("the link to \"{book}\" has no path: Change Source gives it one")))?;
+        let path = gridcraft_xlsx::link_path(target, d.wb.source_dir.as_deref())
+            .ok_or_else(|| refused(format!("the path of \"{book}\" names no file on this computer: {target}")))?;
+        if !on_this_computer(&path) {
+            return Err(refused(format!("\"{}\" is on another computer: open it from File › Open", path.display())));
+        }
+        Ok(path)
+    }
+}
+
+/// Collects what the formulas of `d` read of other workbooks, unless it is known for the
+/// workbook as it is. Whether it was collected again.
+fn collect_needs(d: &mut DocState) -> bool {
+    if std::ptr::eq(d.links.of.as_ptr(), Arc::as_ptr(&d.wb)) && d.links.of.strong_count() > 0 {
+        return false;
+    }
+    d.links.needs = needs_of(&d.wb);
+    d.links.of = Arc::downgrade(&d.wb);
+    d.links.may_read = !d.links.needs.is_empty();
+    true
+}
+
+/// Gives `d` the links `links` and recalculates what reads them. No Undo step, and the workbook
+/// counts as changed. `false` when the recalculation was asked to stop: nothing changed then.
+fn with_links(d: &mut DocState, links: gridcraft_model::Links) -> bool {
+    let mut wb = (*d.wb).clone();
+    wb.links = links;
+    // The formulas that read another workbook are calculated at every recalculation
+    // (`gridcraft_calc::precedents`), with what depends on them.
+    d.calc.cells_changed(&mut wb, &[]);
+    if d.calc.interrupt.as_ref().is_some_and(|interrupt| interrupt.was_hit()) {
+        d.calc.restore_after_stop(&d.wb, Some(&[]));
+        return false;
+    }
+    d.wb = Arc::new(wb);
+    d.revision += 1;
+    // The formulas are the ones the needs were collected from.
+    d.links.of = Arc::downgrade(&d.wb);
+    true
+}
+
+/// Whether `path` (absolute) is a file of this computer's own disks, not of a server: on
+/// Windows a drive letter, elsewhere any path (a mounted share is the system's to reach).
+fn on_this_computer(path: &std::path::Path) -> bool {
+    use std::path::{Component, Prefix};
+    match path.components().next() {
+        Some(Component::Prefix(prefix)) => matches!(prefix.kind(), Prefix::Disk(_) | Prefix::VerbatimDisk(_)),
+        Some(Component::RootDir) => true,
+        _ => false,
     }
 }
 

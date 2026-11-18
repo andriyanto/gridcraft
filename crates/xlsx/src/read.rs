@@ -511,7 +511,9 @@ pub fn read_xlsx<'a>(bytes: &'a [u8], opts: crate::ReadOptions<'a>) -> Result<(W
     // Legacy formulas read as dynamic-array formulas with Excel's implicit `@`.
     crate::array_formula::apply_legacy(&mut wb, legacy_formulas, functions);
     // Links to other workbooks: from numbers (`[1]Sheet1!A1`) to the workbooks' names.
-    crate::passthrough::links::read(&mut wb);
+    // The ones that are workbooks are in the model, and the workbook's own Edit Links says what
+    // is known of each; only what is not read at all is worth a warning.
+    crate::passthrough::links::read(&mut wb).into_iter().for_each(|unread| cx.warn(unread));
     wb.styles = cx.styles;
     wb.phonetics = cx.phonetics;
     Ok((wb, cx.report))

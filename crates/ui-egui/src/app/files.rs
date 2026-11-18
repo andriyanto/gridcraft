@@ -31,12 +31,17 @@ impl SheetApp {
         // The opened workbook's window shows them, however it was opened (a script may have run
         // `file.open` on the session directly).
         self.follow_active_window();
-        let Some(list) = r.get("warnings").and_then(Json::as_array) else {
-            self.notice = None;
-            return;
-        };
+        // A workbook that reads workbooks that are not open shows the values its file saved.
+        // Nothing reads those files unless the person asks: the bar says so and leads to Edit
+        // Links, which can (this is where Excel asks whether to update the links).
+        let closed_links = self
+            .engine("data.editLinks", json!({}))
+            .ok()
+            .and_then(|links| links.as_array().map(|links| links.iter().any(|l| l.get("status").and_then(Json::as_str) != Some("open"))))
+            .unwrap_or(false);
+        let list = r.get("warnings").and_then(Json::as_array).cloned().unwrap_or_default();
         let msgs: Vec<&str> = list.iter().filter_map(Json::as_str).collect();
-        if msgs.is_empty() {
+        if msgs.is_empty() && !closed_links {
             // A clean open clears any notice left over from the previous document.
             self.notice = None;
             return;
@@ -51,6 +56,9 @@ impl SheetApp {
                 "This workbook contains VBA macros. GridCraft keeps them when you save as .xlsm, but does not run them."
             };
             self.notice = Some(Notice { text: text.into(), kind: NoticeKind::Warning, action: Some(("What this means".into(), "macros".into())) });
+        } else if closed_links {
+            let text = "This workbook reads cells of other workbooks that are not open. It shows the values saved in its file.";
+            self.notice = Some(Notice { text: text.into(), kind: NoticeKind::Info, action: Some(("Edit Links…".into(), "editLinks".into())) });
         } else {
             let text = if msgs.len() == 1 {
                 msgs[0].to_string()

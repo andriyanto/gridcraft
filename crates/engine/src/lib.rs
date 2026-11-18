@@ -6,6 +6,7 @@
 #![deny(clippy::unwrap_used, clippy::expect_used, clippy::panic, clippy::unimplemented, clippy::todo, clippy::unreachable)]
 #![forbid(unsafe_code)]
 
+pub mod book_links;
 pub mod catalog;
 pub mod cf;
 mod chart_svg;
@@ -228,6 +229,8 @@ pub struct DocState {
     /// The references `edit.goTo` with `record: true` went to in this document, newest first,
     /// without names, each area written with its sheet (`Sheet1!B14:C22,Sheet1!F19:G30`).
     pub go_to_recent: Vec<String>,
+    /// What is known of this workbook's formulas into other workbooks ([`book_links`]).
+    pub(crate) links: book_links::LinkState,
 }
 
 /// What a caught panic said.
@@ -323,6 +326,7 @@ impl DocState {
             touched: None,
             edits: None,
             go_to_recent: self.go_to_recent.clone(),
+            links: self.links.clone(),
         }
     }
 
@@ -367,6 +371,7 @@ impl DocState {
             touched: None,
             edits: None,
             go_to_recent: vec![],
+            links: book_links::LinkState::unknown(),
         }
     }
     pub fn is_dirty(&self) -> bool {
@@ -570,6 +575,9 @@ pub struct Session {
     pub text_width: Option<TextWidth>,
     /// Stops the running command's recalculation when asked to (see [`Session::interrupt`]).
     interrupt: Arc<gridcraft_calc::Interrupt>,
+    /// The open workbooks' names as of the last command, by uid, while any of them reads
+    /// another ([`book_links`]): a workbook saved under another name is found by comparing.
+    titles: Vec<(u64, String)>,
 }
 
 impl Session {
@@ -639,6 +647,7 @@ impl Session {
             marks: Vec::new(),
             text_width: self.text_width.clone(),
             interrupt: Arc::default(),
+            titles: Vec::new(),
         })
     }
     /// Makes a [`Session::stand_in`] a session to work in, when the session it stood in for is
@@ -1031,6 +1040,10 @@ impl Session {
         if self.depth == 0 {
             self.trim_history();
             self.group_step = None;
+            if result.is_ok() {
+                // What the open workbooks keep of each other's cells follows what the command did.
+                self.sync_links();
+            }
         } else if let Some(uid) = doc_uid {
             self.bound_tail(uid);
         }

@@ -274,6 +274,32 @@ fn adjust_ref(r: Reference, edit: &Edit) -> Option<Reference> {
     }
 }
 
+/// Renames the workbook `old` to `new` in references into it (`[old]Sheet1!A1`).
+pub fn rename_book(e: Expr, old: &str, new: &str) -> Expr {
+    e.map(&mut |x| match x {
+        Expr::Ref(mut r) => {
+            if let SheetSel::External(book) = &mut r.sheet
+                && crate::same_name(&book.0, old)
+            {
+                book.0 = new.to_string();
+            }
+            Expr::Ref(r)
+        }
+        other => other,
+    })
+}
+
+/// The cells of other workbooks `e` reads: (workbook, sheet, range) of each such reference.
+pub fn external_refs(e: &Expr, out: &mut Vec<(String, String, gridcraft_core::RangeRef)>) {
+    e.walk(&mut |x| {
+        if let Expr::Ref(r) = x
+            && let Some((book, sheet)) = r.sheet.as_external()
+        {
+            out.push((book.to_string(), sheet.to_string(), r.range()));
+        }
+    });
+}
+
 /// Renames sheet references `old` → `new`.
 pub fn rename_sheet(e: Expr, old: &str, new: &str) -> Expr {
     e.map(&mut |x| match x {

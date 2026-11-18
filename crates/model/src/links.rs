@@ -56,6 +56,19 @@ impl ExternalLink {
         self.sheets.iter().find(|s| gridcraft_formula::same_name(&s.name, name))
     }
 
+    /// Notes that the source has a sheet `name`, with nothing read of it yet (a reference into
+    /// a sheet the link does not know is `#REF!`; into one it knows, blank). `false` at the limit.
+    pub fn touch(&mut self, name: &str) -> bool {
+        if self.sheet(name).is_some() {
+            return true;
+        }
+        if self.sheets.len() >= MAX_LINK_SHEETS {
+            return false;
+        }
+        self.sheets.push(LinkSheet { name: name.to_string(), cells: BTreeMap::new() });
+        true
+    }
+
     /// How many values the link keeps.
     pub fn cell_count(&self) -> usize {
         self.sheets.iter().map(|s| s.cells.len()).sum()

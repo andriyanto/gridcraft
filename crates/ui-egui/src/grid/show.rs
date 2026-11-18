@@ -1,6 +1,6 @@
 use super::Trace;
 use super::cursor::update_cursor;
-use super::editor::{in_cell_editor, list_picker, validation_arrow};
+use super::editor::{draft_gone_away, in_cell_editor, list_picker, validation_arrow};
 use super::geo::Geo;
 use super::interact::{interact, paint_freeze_handles};
 use super::menus::{context_menu, error_check_tag, fill_menu, fill_options_tag, filter_menu, header_menu, object_menu};
@@ -378,6 +378,8 @@ fn show_grid_interactions(app: &mut SheetApp, ui: &mut egui::Ui, resp: &egui::Re
     crate::text_box::show(app, ui, geo, sh);
     if app.editor.as_ref().is_some_and(|e| !e.from_formula_bar) {
         in_cell_editor(app, ui, geo, sh, wb);
+    } else if app.editor.is_none() {
+        draft_gone_away(app, ui, geo, sh, wb);
     }
     filter_menu(app, ui, geo, previous_popups.0 == app.grid.filter_menu);
     list_picker(app, ui, geo, previous_popups.1 == app.grid.list_picker);

@@ -218,7 +218,8 @@ impl SheetApp {
         // first): the draft goes into its own window instead of floating over this one. If its
         // workbook refuses it, its window comes back to the front with the draft open. (Not
         // while a command runs in the background: the draft is entered once it is over.)
-        if !self.is_busy() && self.draft_elsewhere() {
+        // (Nor a formula that came to this window for its references: `carry_draft`.)
+        if !self.is_busy() && self.draft_elsewhere() && !self.draft_away() {
             self.commit_edit(0, 0, false, false);
         }
         // The language the widgets translate with this frame (see `i18n::current`).
@@ -244,8 +245,9 @@ impl SheetApp {
             ribbon::show(self, ui);
             widgets::notice_bar(self, ui);
             // Python mode edits only in the formula bar: it shows while a Python edit is open,
-            // also when the preference hides it.
-            if self.session.prefs.formula_bar || self.editor.as_ref().is_some_and(|e| e.python) {
+            // also when the preference hides it. So it does for a formula that came from
+            // another window: the bar is the one place its text and keys are here.
+            if self.session.prefs.formula_bar || self.editor.as_ref().is_some_and(|e| e.python || e.away) {
                 formula_bar::show(self, ui);
             }
             if self.ui.status_bar {

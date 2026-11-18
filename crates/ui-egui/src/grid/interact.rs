@@ -445,6 +445,7 @@ fn handle_press(app: &mut SheetApp, input: &InteractionInput<'_>) {
         return;
     }
     // Point mode while editing a formula: clicking inserts a reference.
+    let book = app.pointed_book();
     if let Some(ed) = app.editor.as_mut()
         && ed.can_point()
     {
@@ -455,11 +456,7 @@ fn handle_press(app: &mut SheetApp, input: &InteractionInput<'_>) {
         };
         let range = RangeRef::new(anchor, c);
         let text = if range.is_single() { c.a1() } else { range.a1() };
-        let sheet_name = (ed.sheet != wb.active_sheet()).then(|| sh.name.clone());
-        let r = match sheet_name {
-            Some(n) => format!("{}!{text}", gridcraft_engine::formula::quote_sheet(&n)),
-            None => text,
-        };
+        let r = ed.refer(&text, wb.active_sheet(), &sh.name, book.as_deref());
         if mods.command && !mods.shift {
             ed.append_ref(&r);
         } else {
@@ -822,6 +819,7 @@ fn format_painter_apply(app: &mut SheetApp) {
 /// Point mode on a header: inserts a whole-row or whole-column reference instead of selecting,
 /// and dragging on from there extends it.
 fn point_header(app: &mut SheetApp, wb: &Workbook, sh: &Sheet, range: RangeRef, extend: bool, add: bool) -> bool {
+    let book = app.pointed_book();
     let Some(ed) = app.editor.as_mut().filter(|ed| ed.can_point()) else { return false };
     let edit_sheet = ed.sheet;
     let active_sheet = wb.active_sheet();
@@ -846,7 +844,7 @@ fn point_header(app: &mut SheetApp, wb: &Workbook, sh: &Sheet, range: RangeRef, 
     } else {
         range
     };
-    let reference = header_reference(ed, wb, sh, range);
+    let reference = ed.refer(&range.a1(), wb.active_sheet(), &sh.name, book.as_deref());
     if add {
         ed.append_ref(&reference);
     } else {
@@ -862,11 +860,6 @@ fn point_header(app: &mut SheetApp, wb: &Workbook, sh: &Sheet, range: RangeRef, 
         Drag::PointRows(if range.start.row == pressed.start.row { range.end.row } else { range.start.row })
     };
     true
-}
-
-fn header_reference(ed: &EditState, wb: &Workbook, sh: &Sheet, range: RangeRef) -> String {
-    let reference = range.a1();
-    if ed.sheet != wb.active_sheet() { format!("{}!{reference}", gridcraft_engine::formula::quote_sheet(&sh.name)) } else { reference }
 }
 
 /// The frame that starts a drag reports no `dragged()`, so its movement is applied here.
@@ -895,8 +888,9 @@ fn point_header_to(app: &mut SheetApp, geo: &Geo, sh: &Sheet, wb: &Workbook, dra
         }
         _ => return,
     };
+    let book = app.pointed_book();
     let Some(ed) = app.editor.as_mut().filter(|ed| ed.point_at_caret()) else { return };
-    let reference = header_reference(ed, wb, sh, range);
+    let reference = ed.refer(&range.a1(), wb.active_sheet(), &sh.name, book.as_deref());
     ed.insert_ref(&reference);
     ed.point_cell = Some(pointer);
     ed.point_anchor = Some((wb.active_sheet(), opposite));
@@ -907,6 +901,7 @@ fn select_to_pointer(app: &mut SheetApp, geo: &Geo, sh: &Sheet, wb: &Workbook, p
         geo.row_at(sh, p.y.clamp(geo.cells.top() + 1.0, geo.cells.bottom() - 1.0)),
         geo.col_at(sh, p.x.clamp(geo.cells.left() + 1.0, geo.cells.right() - 1.0)),
     );
+    let book = app.pointed_book();
     if let Some(d) = app.dialog.as_mut().filter(|d| d.picks_references()) {
         d.pick_reference(cell, &sh.name, true);
     } else if let Some(ed) = app.editor.as_mut()
@@ -915,7 +910,7 @@ fn select_to_pointer(app: &mut SheetApp, geo: &Geo, sh: &Sheet, wb: &Workbook, p
         if let Some(start) = ed.point_anchor.filter(|(sheet, _)| *sheet == wb.active_sheet()).map(|(_, cell)| cell).or(ed.point_cell) {
             let range = RangeRef::new(start, cell);
             let text = if range.is_single() { range.start.a1() } else { range.a1() };
-            let text = if ed.sheet != wb.active_sheet() { format!("{}!{text}", gridcraft_engine::formula::quote_sheet(&sh.name)) } else { text };
+            let text = ed.refer(&text, wb.active_sheet(), &sh.name, book.as_deref());
             ed.insert_ref(&text);
             ed.point_cell = Some(cell);
             ed.point_anchor = Some((wb.active_sheet(), start));
@@ -1132,7 +1127,10 @@ pub fn follow_link(app: &mut SheetApp, target: &str) {
 pub fn point_move(app: &mut SheetApp, ed: &mut EditState, dr: i64, dc: i64, extend: bool, jump: bool) {
     let Some(d) = app.session.active() else { return };
     let Some(sheet) = d.wb.active() else { return };
-    let from = ed.point_cell.unwrap_or(ed.cell);
+    // In another workbook's window the keys start from the cell selected there: the draft's
+    // own cell is a place in its own workbook.
+    let book = (d.uid != ed.doc).then(|| d.display_title());
+    let from = ed.point_cell.unwrap_or(if book.is_some() { d.selection.active } else { ed.cell });
     let to = if jump { gridcraft_engine::selection::jump(sheet, from, dr.signum(), dc.signum()) } else { from.offset_clamped(dr, dc) };
     let anchor = if extend {
         // The anchor is the corner opposite the moving end: the written range is normalized, so
@@ -1151,7 +1149,7 @@ pub fn point_move(app: &mut SheetApp, ed: &mut EditState, dr: i64, dc: i64, exte
         to
     };
     let text = if extend { RangeRef::new(anchor, to).a1() } else { to.a1() };
-    let text = if ed.sheet != d.wb.active_sheet() { format!("{}!{text}", gridcraft_engine::formula::quote_sheet(&sheet.name)) } else { text };
+    let text = ed.refer(&text, d.wb.active_sheet(), &sheet.name, book.as_deref());
     let sheet = d.wb.active_sheet();
     ed.insert_ref(&text);
     ed.point_cell = Some(to);

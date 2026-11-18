@@ -17,15 +17,19 @@ fn sheet_prefix(s: &SheetSel) -> String {
             let joined = format!("{a}:{b}");
             if needs_quotes(a) || needs_quotes(b) { format!("'{}'!", joined.replace('\'', "''")) } else { format!("{joined}!") }
         }
-        SheetSel::External(x) => {
-            let (book, sheet) = &**x;
-            let joined = format!("[{book}]{sheet}");
-            // Between its brackets a workbook's name may start with a digit or look like a cell
-            // (`[1]`, `[A1.xlsx]`); it is the other characters that need the quotes.
-            let plain = |c: char| c.is_alphanumeric() || matches!(c, '_' | '.');
-            if !book.chars().all(plain) || needs_quotes(sheet) { format!("'{}'!", joined.replace('\'', "''")) } else { format!("{joined}!") }
-        }
+        SheetSel::External(x) => quote_book_sheet(&x.0, &x.1),
     }
+}
+
+/// What a reference into the sheet `sheet` of another workbook `book` starts with, the `!`
+/// included: `[Budget.xlsx]Sheet1!`, quoted when either name needs it
+/// (`'[My Budget.xlsx]Sheet 1'!`).
+pub fn quote_book_sheet(book: &str, sheet: &str) -> String {
+    let joined = format!("[{book}]{sheet}");
+    // Between its brackets a workbook's name may start with a digit or look like a cell
+    // (`[1]`, `[A1.xlsx]`); it is the other characters that need the quotes.
+    let plain = |c: char| c.is_alphanumeric() || matches!(c, '_' | '.');
+    if !book.chars().all(plain) || needs_quotes(sheet) { format!("'{}'!", joined.replace('\'', "''")) } else { format!("{joined}!") }
 }
 
 fn push_anchor_a1(s: &mut String, a: &Anchor) {

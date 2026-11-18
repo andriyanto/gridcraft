@@ -22,6 +22,8 @@ thread_local! {
     static EVENTS: RefCell<Vec<egui::Event>> = const { RefCell::new(Vec::new()) };
     /// Where each window other than the root's was asked to open (its builder's position).
     static PLACED: RefCell<egui::ViewportIdMap<Option<egui::Pos2>>> = RefCell::new(egui::ViewportIdMap::default());
+    /// Input events for the next frame of a window other than the root's (a click, a key in it).
+    static CHILD_EVENTS: RefCell<egui::ViewportIdMap<Vec<egui::Event>>> = RefCell::new(egui::ViewportIdMap::default());
 }
 
 fn record(mut out: egui::FullOutput) {
@@ -43,6 +45,7 @@ struct Desk {
 impl Desk {
     fn new(quit_with_last_window: bool) -> Desk {
         INFOS.with(|i| i.borrow_mut().clear());
+        CHILD_EVENTS.with(|e| e.borrow_mut().clear());
         let ctx = Context::default();
         ctx.set_embed_viewports(false);
         Context::set_immediate_viewport_renderer(|ctx, viewport| {
@@ -51,6 +54,7 @@ impl Desk {
             let mut input = RawInput { viewport_id: id, ..RawInput::default() };
             input.viewports = INFOS.with(|i| i.borrow().clone());
             input.viewports.entry(id).or_default().parent = Some(viewport.ids.parent);
+            input.events = CHILD_EVENTS.with(|e| e.borrow_mut().remove(&id).unwrap_or_default());
             let mut cb = viewport.viewport_ui_cb;
             record(ctx.run_ui(input, |ui| cb(ui)));
         });
@@ -789,4 +793,184 @@ fn a_new_window_does_not_open_exactly_over_another() {
     INFOS.with(|i| i.borrow_mut().entry(v3).or_default().outer_rect = rect(56.0, 56.0));
     let sent = desk.frames(3);
     assert!(!sent.iter().any(|(_, c)| matches!(c, ViewportCommand::OuterPosition(_))), "{sent:?}");
+}
+
+/// A formula that takes its references from another workbook's window (`SheetApp::carry_draft`,
+/// `docs/external-references.md` step A4).
+mod pointing_across_windows {
+    use super::*;
+    use egui::{Event, Key, Modifiers, PointerButton};
+    use gridcraft_ui_egui::grid::Geo;
+
+    /// Book1 (the root's window) and Book2, with Book1's window in front and Book2!C3 = 5.
+    fn two_books() -> (Desk, u64, u64) {
+        let mut desk = Desk::new(true);
+        desk.app.run("file.new", json!({})).unwrap();
+        desk.app.run("cell.set", json!({"cell": "C3", "input": "5"})).unwrap();
+        desk.app.run("selection.set", json!({"range": "A1"})).unwrap();
+        desk.frames(3);
+        let (w1, w2) = (desk.window_of(0), desk.window_of(1));
+        focus(&mut desk, w1, &[]);
+        assert_eq!(desk.app.session.active_window(), Some(w1));
+        (desk, w1, w2)
+    }
+
+    /// The keyboard goes to window `to`, with `events` arriving there in the same frame (the
+    /// click that brought it forward).
+    fn focus(desk: &mut Desk, to: u64, events: &[Event]) -> Vec<(ViewportId, ViewportCommand)> {
+        let shown = desk.windows.shown_windows();
+        let target = desk.viewport(to);
+        INFOS.with(|i| {
+            let mut i = i.borrow_mut();
+            for w in shown {
+                let vp = desk.windows.viewport_of(w).unwrap();
+                i.entry(vp).or_default().focused = Some(vp == target);
+            }
+        });
+        send(desk, to, events)
+    }
+
+    /// `events` arrive in window `window`.
+    fn send(desk: &mut Desk, window: u64, events: &[Event]) -> Vec<(ViewportId, ViewportCommand)> {
+        let vp = desk.viewport(window);
+        if vp == ViewportId::ROOT {
+            EVENTS.with(|e| e.borrow_mut().extend(events.iter().cloned()));
+        } else {
+            CHILD_EVENTS.with(|e| e.borrow_mut().entry(vp).or_default().extend(events.iter().cloned()));
+        }
+        desk.frames(3)
+    }
+
+    /// A click on `cell` of the sheet window `window` shows.
+    fn click(desk: &mut Desk, window: u64, cell: &str) -> Vec<Event> {
+        let back = desk.app.session.active_window().unwrap();
+        desk.app.enter_window(window);
+        let sheet = desk.app.session.active().unwrap().wb.active().unwrap();
+        let geo = Geo::new(sheet, desk.app.grid.rect.expect("the window's grid has been drawn"), desk.app.view().scroll);
+        let pos = geo.cell_rect(sheet, CellRef::parse(cell).unwrap()).center();
+        desk.app.enter_window(back);
+        let button = |pressed| Event::PointerButton { pos, button: PointerButton::Primary, pressed, modifiers: Modifiers::NONE };
+        vec![Event::PointerMoved(pos), button(true), button(false)]
+    }
+
+    fn key(key: Key) -> Vec<Event> {
+        vec![Event::Key { key, physical_key: None, pressed: true, repeat: false, modifiers: Modifiers::NONE }]
+    }
+
+    fn formula(desk: &Desk, doc: usize, cell: &str) -> Option<String> {
+        let sheet = desk.app.session.documents()[doc].wb.sheet(0).unwrap();
+        sheet.cell(CellRef::parse(cell).unwrap()).and_then(|c| c.formula.as_ref()).map(|f| f.text.clone())
+    }
+
+    /// `=` typed in Book1!B2.
+    fn typing(desk: &mut Desk, text: &str) {
+        desk.app.run("selection.set", json!({"range": "B2"})).unwrap();
+        desk.app.begin_edit(Some(text.into()), false);
+        desk.frames(2);
+    }
+
+    #[test]
+    fn the_click_that_brings_another_workbook_forward_points_at_its_cell() {
+        let (mut desk, w1, w2) = two_books();
+        typing(&mut desk, "=");
+        let events = click(&mut desk, w2, "C3");
+        focus(&mut desk, w2, &events);
+        assert_eq!(desk.app.session.active_window(), Some(w2), "the window clicked is the one in front");
+        let ed = desk.app.editor.as_ref().expect("the formula is open in the window it points in");
+        assert_eq!((ed.text.as_str(), ed.away, ed.window), ("=[Book2]Sheet1!C3", true, Some(w1)));
+        assert_eq!(formula(&desk, 0, "B2"), None, "nothing is entered yet");
+        assert_eq!(desk.app.session.documents()[1].selection.active, CellRef::parse("A1").unwrap(), "Book2's own selection stays");
+        // Another click replaces the reference, as on the formula's own sheet.
+        let events = click(&mut desk, w2, "D4");
+        send(&mut desk, w2, &events);
+        assert_eq!(desk.app.editor.as_ref().map(|ed| ed.text.as_str()), Some("=[Book2]Sheet1!D4"));
+        let events = click(&mut desk, w2, "C3");
+        send(&mut desk, w2, &events);
+
+        // Enter there: the formula is in its own cell, and its window is in front again.
+        let sent = send(&mut desk, w2, &key(Key::Enter));
+        assert_eq!(formula(&desk, 0, "B2").as_deref(), Some("[Book2]Sheet1!C3"));
+        assert_eq!(desk.app.session.documents()[0].wb.sheet(0).unwrap().value(CellRef::parse("B2").unwrap()), Value::Number(5.0));
+        assert_eq!(desk.app.session.active_window(), Some(w1));
+        assert!(sent_to(&sent, desk.viewport(w1), &ViewportCommand::Focus), "{sent:?}");
+        assert!(desk.app.editor.is_none());
+        desk.app.enter_window(w2);
+        assert!(desk.app.editor.is_none(), "no draft is left in the window pointed in");
+        assert_eq!(formula(&desk, 1, "B2"), None, "nothing was entered in the workbook pointed at");
+    }
+
+    #[test]
+    fn esc_in_the_other_window_drops_the_formula_and_brings_its_window_back() {
+        let (mut desk, w1, w2) = two_books();
+        typing(&mut desk, "=1+");
+        let events = click(&mut desk, w2, "C3");
+        focus(&mut desk, w2, &events);
+        assert_eq!(desk.app.editor.as_ref().map(|ed| ed.text.as_str()), Some("=1+[Book2]Sheet1!C3"));
+        send(&mut desk, w2, &key(Key::Escape));
+        assert_eq!(desk.app.session.active_window(), Some(w1));
+        assert!(desk.app.editor.is_none());
+        assert_eq!(formula(&desk, 0, "B2"), None);
+        assert_eq!(desk.app.session.documents()[0].wb.sheet(0).unwrap().value(CellRef::parse("B2").unwrap()), Value::Empty);
+    }
+
+    #[test]
+    fn the_formula_goes_back_to_its_own_window_with_the_keyboard() {
+        let (mut desk, w1, w2) = two_books();
+        typing(&mut desk, "=1+");
+        // To Book2's window by its title bar (no click on a cell), and back.
+        focus(&mut desk, w2, &[]);
+        assert_eq!(desk.app.editor.as_ref().map(|ed| (ed.text.as_str(), ed.away)), Some(("=1+", true)));
+        focus(&mut desk, w1, &[]);
+        assert_eq!(desk.app.session.active_window(), Some(w1));
+        assert_eq!(desk.app.editor.as_ref().map(|ed| (ed.text.as_str(), ed.away)), Some(("=1+", false)));
+        assert_eq!(formula(&desk, 0, "B2"), None, "it was not entered on the way");
+        // At home it is an ordinary draft again: a cell clicked there is one of its own sheet.
+        let events = click(&mut desk, w1, "D4");
+        send(&mut desk, w1, &events);
+        assert_eq!(desk.app.editor.as_ref().map(|ed| ed.text.as_str()), Some("=1+D4"));
+    }
+
+    #[test]
+    fn a_draft_that_takes_no_reference_is_entered_when_its_window_is_left() {
+        let (mut desk, w1, w2) = two_books();
+        typing(&mut desk, "=1+2");
+        let events = click(&mut desk, w2, "C3");
+        focus(&mut desk, w2, &events);
+        assert_eq!(formula(&desk, 0, "B2").as_deref(), Some("1+2"), "entered in its own window, as before");
+        assert!(desk.app.editor.is_none());
+        assert_eq!(desk.app.session.active_window(), Some(w2));
+        assert_eq!(desk.app.session.documents()[1].selection.active, CellRef::parse("C3").unwrap(), "the click selected the cell");
+        let _ = w1;
+    }
+
+    #[test]
+    fn a_command_that_enters_the_formula_goes_on_in_the_window_it_was_asked_in() {
+        let (mut desk, _w1, w2) = two_books();
+        typing(&mut desk, "=");
+        let events = click(&mut desk, w2, "C3");
+        focus(&mut desk, w2, &events);
+        // Save, New, a close: they enter the draft first. It lands in its own workbook, and
+        // the command still acts on the window it was asked in.
+        desk.frame_with(|app, _| app.run_or_alert("file.new", json!({})));
+        desk.frames(3);
+        assert_eq!(formula(&desk, 0, "B2").as_deref(), Some("[Book2]Sheet1!C3"));
+        assert_eq!(desk.app.session.documents().len(), 3);
+        assert_eq!(desk.app.session.active().map(|d| d.display_title()).as_deref(), Some("Book3"));
+        assert!(desk.app.editor.is_none());
+    }
+
+    #[test]
+    fn a_workbook_a_formula_cant_name_is_not_pointed_at() {
+        let (mut desk, w1, w2) = two_books();
+        desk.app.enter_window(w2);
+        desk.app.session.active_mut().unwrap().title = "Odd]Name".into();
+        desk.app.enter_window(w1);
+        typing(&mut desk, "=1+");
+        let events = click(&mut desk, w2, "C3");
+        focus(&mut desk, w2, &events);
+        // As before: the draft is entered in its own window when that is left (and refused
+        // there, as `=1+` is no formula: its window comes back with it).
+        assert!(desk.app.editor.as_ref().is_none_or(|ed| !ed.away));
+        assert_eq!(formula(&desk, 0, "B2"), None);
+    }
 }

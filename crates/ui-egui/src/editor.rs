@@ -11,8 +11,12 @@ pub struct EditState {
     /// The workbook (`DocState::uid`) the draft belongs to: it is drawn and committed only there.
     pub doc: u64,
     /// The window it was typed in: switching to another window, even on the same workbook,
-    /// commits it there first (`None` until the app sets it).
+    /// commits it there first (`None` until the app sets it), unless the draft is a formula
+    /// that can take a reference: that one goes along (`away`).
     pub window: Option<u64>,
+    /// The draft is shown in another window than its own: a formula picking up references
+    /// there. It is still entered in `window`, on `sheet`, at `cell`.
+    pub away: bool,
     /// The sheet's index when the draft was last resolved; [`EditState::sheet_in`] finds it again
     /// by `sheet_uid` after sheets are inserted, deleted or moved.
     pub sheet: usize,
@@ -77,6 +81,7 @@ impl EditState {
         EditState {
             doc,
             window: None,
+            away: false,
             sheet,
             sheet_uid: 0,
             py_cell: false,
@@ -172,6 +177,18 @@ impl EditState {
             && (self.text.starts_with('=')
                 || (self.text.starts_with('+') && self.text.len() > 1)
                 || (self.text.starts_with('-') && self.text.len() > 1 && !self.text[1..].starts_with(|c: char| c.is_ascii_digit())))
+    }
+
+    /// `cells` (`A1`, `B2:C3`, `A:A`) of the sheet shown, as this draft refers to them: as
+    /// they are on the draft's own sheet, with the sheet's name on another sheet of its workbook,
+    /// and with the workbook's name too in another workbook's window (`book`: that workbook's
+    /// name, see [`SheetApp::pointed_book`](crate::SheetApp::pointed_book)).
+    pub fn refer(&self, cells: &str, shown: usize, sheet: &str, book: Option<&str>) -> String {
+        match book {
+            Some(book) => format!("{}{cells}", gridcraft_engine::formula::quote_book_sheet(book, sheet)),
+            None if self.sheet == shown => cells.to_string(),
+            None => format!("{}!{cells}", gridcraft_engine::formula::quote_sheet(sheet)),
+        }
     }
 
     fn byte_caret(&self) -> usize {
@@ -424,6 +441,24 @@ pub fn ref_is_on_sheet(ref_sheet: Option<&str>, origin: &str, shown: &str) -> bo
     ref_sheet.unwrap_or(origin).eq_ignore_ascii_case(shown)
 }
 
+/// [`ref_is_on_sheet`] in another workbook's window: only a reference that names that workbook
+/// (`book`) and the sheet shown is there.
+pub fn ref_is_in_book(ref_sheet: Option<&str>, book: &str, shown: &str) -> bool {
+    use gridcraft_engine::formula::{SheetSel, same_name};
+    match ref_sheet.and_then(SheetSel::parse_external) {
+        Some(Ok(sel)) => sel.as_external().is_some_and(|(b, sheet)| same_name(b, book) && same_name(sheet, shown)),
+        _ => false,
+    }
+}
+
+/// Whether a formula can name a workbook `title`: it fits between the brackets, and is not
+/// what a file writes for a link's number.
+pub fn book_can_be_named(title: &str) -> bool {
+    use gridcraft_engine::formula::SheetSel;
+    let number = !title.is_empty() && title.bytes().all(|b| b.is_ascii_digit());
+    !number && matches!(SheetSel::parse_external(&format!("[{title}]S")), Some(Ok(sel)) if sel.as_external() == Some((title, "S")))
+}
+
 /// Excel-style AutoComplete: the one distinct text entry in the same column (contiguous data
 /// above and below) that starts with `typed` (case-insensitive). `None` when ambiguous.
 pub fn column_completion(sheet: &gridcraft_engine::model::Sheet, at: CellRef, typed: &str) -> Option<String> {
@@ -478,6 +513,39 @@ pub fn completion_rest<'a>(full: &'a str, typed: &str) -> Option<&'a str> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_reference_is_written_for_the_place_the_cells_are_in() {
+        let e = EditState::new(1, 0, CellRef::new(0, 0), "=".into(), true, false);
+        assert_eq!(e.refer("B4", 0, "Sheet1", None), "B4", "the draft's own sheet");
+        assert_eq!(e.refer("B4:C5", 1, "My Data", None), "'My Data'!B4:C5", "another sheet of its workbook");
+        assert_eq!(e.refer("B4", 0, "Sheet1", Some("Book2")), "[Book2]Sheet1!B4", "another workbook, even its first sheet");
+        assert_eq!(e.refer("A:A", 2, "Q1 plan", Some("My Budget.xlsx")), "'[My Budget.xlsx]Q1 plan'!A:A");
+        assert_eq!(e.refer("B4", 0, "It's", Some("Bob's.xlsx")), "'[Bob''s.xlsx]It''s'!B4");
+        // What is written is found again as a reference into that workbook's sheet.
+        for (book, sheet) in [("Book2", "Sheet1"), ("My Budget.xlsx", "Q1 plan"), ("Bob's.xlsx", "It's")] {
+            let text = format!("=1+{}", e.refer("B4", 0, sheet, Some(book)));
+            let refs = formula_refs(&text);
+            let [(start, end, range, on, _)] = refs.as_slice() else { panic!("one reference in {text}: {refs:?}") };
+            assert_eq!((*start, *end, range.a1()), (3, text.len(), "B4".to_string()), "{text}");
+            assert!(ref_is_in_book(on.as_deref(), book, sheet), "{text}: {on:?}");
+            assert!(ref_is_in_book(on.as_deref(), &book.to_uppercase(), &sheet.to_uppercase()), "names compare without regard to case");
+            assert!(!ref_is_in_book(on.as_deref(), "Other", sheet) && !ref_is_in_book(on.as_deref(), book, "Other"));
+        }
+        assert!(!ref_is_in_book(None, "Book2", "Sheet1"), "a reference without a workbook is not in another workbook");
+        assert!(!ref_is_in_book(Some("Sheet1"), "Book2", "Sheet1"));
+    }
+
+    #[test]
+    fn a_workbook_is_named_in_a_formula_only_when_its_name_fits() {
+        for title in ["Book2", "Budget.xlsx", "My Budget (final).xlsx", "Bob's.xlsx", "2024 plan.xlsx", "Übersicht.xlsx"] {
+            assert!(book_can_be_named(title), "{title}");
+        }
+        // Brackets end the name early, and a number is what a file writes for a link.
+        for title in ["", "Odd]Name", "[x]", "2024", "7"] {
+            assert!(!book_can_be_named(title), "{title}");
+        }
+    }
 
     #[test]
     fn point_mode() {

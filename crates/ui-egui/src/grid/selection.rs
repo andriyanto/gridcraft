@@ -105,11 +105,16 @@ pub(crate) fn paint_selection(input: SelectionPaintInput<'_>) {
     // Editing a formula: outline its references instead of the selection.
     if let Some(ed) = &app.editor
         && ed.is_formula()
-        && app.session.active().is_some_and(|d| d.uid == ed.doc)
     {
+        // In another workbook's window only the references that name that workbook are here.
+        let book = app.pointed_book();
         let origin = app.session.active().and_then(|d| d.wb.sheet(ed.sheet)).map_or(sh.name.as_str(), |o| o.name.as_str());
         for (_, _, r, sheet, idx) in crate::editor::formula_refs(&ed.text) {
-            if !crate::editor::ref_is_on_sheet(sheet.as_deref(), origin, &sh.name) {
+            let here = match &book {
+                Some(book) => crate::editor::ref_is_in_book(sheet.as_deref(), book, &sh.name),
+                None => crate::editor::ref_is_on_sheet(sheet.as_deref(), origin, &sh.name),
+            };
+            if !here {
                 continue;
             }
             if !range_in_pane(r, rows, cols) {

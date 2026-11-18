@@ -84,6 +84,25 @@ impl SheetApp {
             // running in the background comes back with.
             self.wait_for_background();
         }
+        // A formula that went to another window for its references is entered in its own. That
+        // window stays in front when the entry is the editor's own (Enter, the bar's button);
+        // a command that entered the draft on its way goes on in the window it was asked in.
+        if self.editor.as_ref().is_some_and(|ed| ed.away) {
+            let own = self.commit_from_keys;
+            let asked_in = self.session.active_window();
+            if !self.bring_draft_home() {
+                self.commit_from_keys = false;
+                return true;
+            }
+            let ok = self.commit_edit(dr, dc, array, fill_selection);
+            if ok
+                && !own
+                && let Some(back) = asked_in.filter(|w| self.session.window(*w).is_some())
+            {
+                self.enter_window(back);
+            }
+            return ok;
+        }
         let Some((doc, window)) = self.editor.as_ref().map(|ed| (ed.doc, ed.window)) else { return true };
         if !self.draft_elsewhere() {
             let background = std::mem::take(&mut self.commit_from_keys);
@@ -107,14 +126,15 @@ impl SheetApp {
         true
     }
 
-    /// A formula is being typed and the sheet shown is another sheet of its workbook: its cells
-    /// are being pointed at. That sheet's own selection is not drawn meanwhile (its outline, its
-    /// fill and its headers): clicks there pick cells for the formula and leave it where it was,
-    /// so it read as a pointer that would not follow.
+    /// A formula is being typed and the sheet shown is not its own: another sheet of its
+    /// workbook, or another workbook's window the formula went to. Its cells are being pointed
+    /// at. That sheet's own selection is not drawn meanwhile (its outline, its fill and its
+    /// headers): clicks there pick cells for the formula and leave it where it was, so it read
+    /// as a pointer that would not follow.
     pub(crate) fn pointing_on_another_sheet(&self) -> bool {
         self.editor
             .as_ref()
-            .is_some_and(|ed| ed.is_formula() && self.session.active().is_some_and(|d| d.uid == ed.doc && d.wb.active_sheet() != ed.sheet))
+            .is_some_and(|ed| ed.is_formula() && self.session.active().is_some_and(|d| d.uid != ed.doc || d.wb.active_sheet() != ed.sheet))
     }
 
     /// The cell draft belongs to a window or workbook other than the one showing.
@@ -122,6 +142,44 @@ impl SheetApp {
         self.editor.as_ref().is_some_and(|ed| {
             self.session.active().map(|d| d.uid) != Some(ed.doc) || ed.window.is_some_and(|w| self.session.active_window() != Some(w))
         })
+    }
+
+    /// The draft is a formula shown in another window than its own, for the references it
+    /// picks up there ([`SheetApp::carry_draft`]).
+    pub(crate) fn draft_away(&self) -> bool {
+        self.editor.as_ref().is_some_and(|ed| ed.away)
+    }
+
+    /// The name a reference to the cells shown starts with when the draft belongs to another
+    /// workbook: the name of the workbook shown. `None` in the draft's own workbook.
+    pub(crate) fn pointed_book(&self) -> Option<String> {
+        let ed = self.editor.as_ref()?;
+        let d = self.session.active()?;
+        (d.uid != ed.doc).then(|| d.display_title())
+    }
+
+    /// A draft that is away goes back to its own window, which becomes the active one, with
+    /// the draft open as it is. `false` when that window's workbook is gone: the draft goes
+    /// with it.
+    pub(crate) fn bring_draft_home(&mut self) -> bool {
+        let Some(mut ed) = self.editor.take_if(|ed| ed.away) else { return true };
+        self.session.mode = gridcraft_engine::Mode::Ready;
+        // Its window, or (when that window closed) its workbook's most recent one.
+        let Some(home) = ed.window.filter(|w| self.session.window(*w).is_some()).or_else(|| self.session.doc_window(ed.doc)) else { return false };
+        self.enter_window(home);
+        if self.editor.is_some() {
+            // That window has a draft of its own (it can't: it never had the keyboard since).
+            return false;
+        }
+        ed.away = false;
+        ed.window = Some(home);
+        ed.point_cell = None;
+        ed.point_anchor = None;
+        ed.request_focus = true;
+        ed.sync_caret = true;
+        self.editor = Some(ed);
+        self.session.mode = gridcraft_engine::Mode::Edit;
+        true
     }
 
     /// Commits the cell and text-box drafts, as Enter would, before a command that can show
@@ -320,7 +378,12 @@ impl SheetApp {
         ok
     }
 
+    /// Drops the draft. One that is away is dropped in its own window, which comes back to the
+    /// front, as after Enter.
     pub fn cancel_edit(&mut self) {
+        if self.draft_away() {
+            self.bring_draft_home();
+        }
         self.editor = None;
         self.session.mode = gridcraft_engine::Mode::Ready;
     }

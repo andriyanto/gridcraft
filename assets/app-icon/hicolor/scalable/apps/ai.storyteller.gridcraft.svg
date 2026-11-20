@@ -1,29 +1,22 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" width="512" height="512">
-  <!-- GridCraft PLACEHOLDER icon: a ledger page with a selected cell, on GridCraft green.
-       Original work; temporary until the owner's engraved creature portrait replaces it
-       Palette: ink #0b0b0c, paper #efe9dc,
-       app colour #1f9d55 (proposed). -->
-  <defs>
-    <clipPath id="tile"><rect width="512" height="512" rx="112"/></clipPath>
-  </defs>
-  <g clip-path="url(#tile)">
-    <rect width="512" height="512" fill="#1f9d55"/>
-    <g transform="rotate(-6 256 268)" stroke="#0b0b0c" stroke-linejoin="round" stroke-linecap="round">
-      <!-- page with a folded top-right corner -->
-      <path d="M112 76 H336 L404 144 V440 H112 Z" fill="#efe9dc" stroke-width="14"/>
-      <path d="M336 76 V144 H404" fill="none" stroke-width="12"/>
-      <!-- title lines -->
-      <path d="M146 106 H272 M146 130 H232" stroke-width="12"/>
-      <!-- header row and row-number column, in the app colour -->
-      <path d="M112 164 H404 V204 H164 V440 H112 Z" fill="#1f9d55" stroke="none"/>
-      <!-- grid -->
-      <path d="M112 164 H404 M112 204 H404 M112 250 H404 M112 296 H404 M112 342 H404 M112 388 H404
-               M164 164 V440 M244 164 V440 M324 164 V440" fill="none" stroke-width="8"/>
-      <!-- the selected cell and its fill handle -->
-      <rect x="244" y="250" width="80" height="46" fill="none" stroke-width="16"/>
-      <rect x="312" y="284" width="24" height="24" fill="#0b0b0c" stroke="#efe9dc" stroke-width="5"/>
-      <!-- double rule under the total -->
-      <path d="M252 410 H316 M252 424 H316" stroke-width="7"/>
+  <!-- Latar: merah bata dengan sudut membulat -->
+  <rect x="0" y="0" width="512" height="512" rx="104" ry="104" fill="#B5472B"/>
+  <!-- Logo diperbesar sekitar 22% dan dipusatkan -->
+  <g transform="translate(256 256) scale(1.22) translate(-256 -271)">
+    <!-- Huruf G berwarna hijau emerald: busur tebal dengan celah di kanan atas dan palang tengah -->
+    <path d="M309.6 145 A70 70 0 1 0 326 190" fill="none" stroke="#50C878" stroke-width="40"/>
+    <rect x="256" y="170" width="70" height="40" fill="#50C878"/>
+    <!-- Buku terbuka dengan halaman ghost white -->
+    <g fill="#F8F8FF">
+      <path d="M92 330 Q176 300 252 332 L252 432 Q176 404 92 432 Z"/>
+      <path d="M420 330 Q336 300 260 332 L260 432 Q336 404 420 432 Z"/>
+    </g>
+    <!-- Teks Grid di halaman kiri dan Ku di halaman kanan, sebagai garis luar huruf
+         DejaVu Sans Condensed Bold (lisensi Bitstream Vera) di sepanjang lengkung halaman,
+         supaya ikon tampil sama di semua komputer tanpa bergantung pada font yang terpasang -->
+    <g fill="#B5472B">
+      <path d="M154.22 379.98Q151.7 381.9 148.85 383.12Q146.01 384.33 142.87 384.83Q135.74 385.97 130.88 382.21Q126.02 378.44 124.81 370.87Q123.59 363.21 127.13 358.14Q130.66 353.08 138.04 351.9Q140.89 351.45 143.59 351.63Q146.3 351.81 148.79 352.61L149.84 359.16Q147.2 358.04 144.73 357.67Q142.25 357.3 139.88 357.68Q135.49 358.38 133.54 361.48Q131.6 364.59 132.41 369.66Q133.21 374.69 135.94 377.06Q138.66 379.43 142.88 378.76Q144.03 378.58 144.99 378.26Q145.95 377.95 146.66 377.48L145.68 371.33L141.21 372.04L140.34 366.57L151.79 364.75Z M176.52 364.32Q175.59 363.87 174.69 363.66Q173.79 363.46 172.87 363.48Q170.21 363.55 168.82 365.48Q167.42 367.42 167.51 370.96L167.78 382.05L160.86 382.21L160.28 358.16L167.19 357.99L167.29 361.94Q168.56 359.55 170.27 358.42Q171.97 357.29 174.4 357.23Q174.74 357.23 175.15 357.25Q175.56 357.27 176.33 357.36Z M181.86 358.14 188.77 358.56 187.29 382.58 180.39 382.15ZM182.44 348.79 189.34 349.21 188.96 355.47 182.05 355.05Z M211.91 365.17 214.07 352.46 220.93 353.63 215.34 386.59 208.47 385.42 209.06 381.99Q207.28 383.85 205.42 384.53Q203.56 385.22 201.32 384.84Q197.38 384.17 195.44 380.26Q193.5 376.34 194.43 370.86Q195.36 365.37 198.48 362.32Q201.61 359.26 205.55 359.93Q207.77 360.31 209.31 361.58Q210.85 362.86 211.91 365.17ZM204.79 379.76Q207 380.14 208.45 378.55Q209.91 376.97 210.48 373.58Q211.06 370.19 210.21 368.22Q209.36 366.24 207.15 365.87Q204.99 365.5 203.54 367.08Q202.08 368.67 201.5 372.06Q200.93 375.45 201.78 377.42Q202.63 379.4 204.79 379.76Z"/>
+      <path d="M312.28 351.35 319.71 350.81 320.57 362.49 330.41 350.02 339.04 349.39 326.27 365.56 342.8 381.28 333.5 381.96 321.14 370.2 322.06 382.8 314.63 383.34Z M344.7 372.39 345.83 357.74 352.77 358.28 352.59 360.68Q352.43 362.63 352.19 365.57Q351.94 368.51 351.86 369.5Q351.63 372.39 351.67 373.68Q351.72 374.96 351.99 375.56Q352.36 376.35 353.02 376.81Q353.67 377.27 354.55 377.34Q356.71 377.5 358.09 375.76Q359.46 374.01 359.71 370.73L360.63 358.89L367.53 359.42L365.67 383.41L358.77 382.88L359.04 379.41Q357.31 381.39 355.49 382.25Q353.67 383.11 351.57 382.94Q347.84 382.65 346.08 379.95Q344.32 377.25 344.7 372.39Z"/>
     </g>
   </g>
 </svg>

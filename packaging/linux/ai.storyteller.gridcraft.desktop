@@ -1,10 +1,10 @@
 [Desktop Entry]
 Type=Application
-Name=GridCraft
+Name=GridKu
 GenericName=Spreadsheet
 Comment=Calculate, analyse and chart data in workbooks
-Exec=gridcraft %F
-TryExec=gridcraft
+Exec=gridku %F
+TryExec=gridku
 Icon=ai.storyteller.gridcraft
 Terminal=false
 StartupNotify=true

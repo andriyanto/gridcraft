@@ -121,7 +121,7 @@ impl Runtime {
             Ok(None) if requested => self.status = Status::UpToDate,
             Ok(None) => {}
             Err(e) => {
-                log::warn!("GridCraft update check failed: {e}");
+                log::warn!("GridKu update check failed: {e}");
                 if requested {
                     self.status = Status::Failed(e);
                 }
@@ -184,7 +184,7 @@ pub(crate) fn show(app: &mut SheetApp, ctx: &egui::Context) {
 pub(crate) fn open_page(app: &mut SheetApp, url: &str) {
     match &app.services.open_url {
         Some(open) => open(url),
-        None => app.message = Some(("GridCraft".into(), format!("Download the latest version from {url}"))),
+        None => app.message = Some(("GridKu".into(), format!("Download the latest version from {url}"))),
     }
 }
 
@@ -196,12 +196,13 @@ mod tests {
     /// repository, never those of the project craft-update lists as GridCraft.
     #[test]
     fn updates_come_from_this_repository() {
-        assert_eq!(crate::UPDATE_APP.repo, "andriyanto/gridcraft");
+        assert_eq!(crate::UPDATE_APP.repo, "andriyanto/gridku");
         assert_ne!(crate::UPDATE_APP.repo, craft_update::suite::GRIDCRAFT.repo);
         assert_eq!(crate::UPDATE_APP.developer, "andriyanto");
-        // The rest is the suite's description of the app: asset names and install ids.
-        assert_eq!(crate::UPDATE_APP.id, craft_update::suite::GRIDCRAFT.id);
-        assert_eq!(download_page(), "https://github.com/andriyanto/gridcraft/releases");
+        // GridKu is an app of its own: its release files are named `gridku-<version>-…`.
+        assert_eq!(crate::UPDATE_APP.id, "gridku");
+        assert_eq!(crate::UPDATE_APP.name, "GridKu");
+        assert_eq!(download_page(), "https://github.com/andriyanto/gridku/releases");
     }
 
     fn release(page: &str) -> Release {
@@ -235,7 +236,7 @@ mod tests {
     /// opens the release's page.
     #[test]
     fn a_newer_release_is_offered_for_download_and_never_installed() {
-        let page = "https://github.com/andriyanto/gridcraft/releases/tag/v99.0.0";
+        let page = "https://github.com/andriyanto/gridku/releases/tag/v99.0.0";
         let (mut app, opened) = app_with(Ok(Some(release(page))));
         let ctx = egui::Context::default();
         start(&mut app, false);
@@ -271,7 +272,7 @@ mod tests {
     /// release's page in the browser and closes the prompt.
     #[test]
     fn the_prompt_has_download_and_later_and_download_opens_the_browser() {
-        let page = "https://github.com/andriyanto/gridcraft/releases/tag/v99.0.0";
+        let page = "https://github.com/andriyanto/gridku/releases/tag/v99.0.0";
         let (mut app, opened) = app_with(Ok(Some(release(page))));
         let ctx = egui::Context::default();
         start(&mut app, false);
@@ -295,7 +296,7 @@ mod tests {
     fn a_link_that_is_no_plain_web_link_opens_the_releases_page_instead() {
         for odd in ["file:///C:/Windows/System32/calc.exe", "javascript:alert(1)", "", "http://example.com/x"] {
             let page = page_of(&release(odd));
-            assert!(page == odd || page == "https://github.com/andriyanto/gridcraft/releases", "{odd} → {page}");
+            assert!(page == odd || page == "https://github.com/andriyanto/gridku/releases", "{odd} → {page}");
             assert!(craft_update::release::safe_web_link(&page), "{odd} → {page}");
         }
     }
@@ -328,6 +329,6 @@ mod tests {
     fn the_download_command_opens_the_releases_page() {
         let (mut app, opened) = app_with(Ok(None));
         app.run("app.downloadUpdate", serde_json::json!({})).unwrap();
-        assert_eq!(*opened.lock().unwrap(), ["https://github.com/andriyanto/gridcraft/releases"]);
+        assert_eq!(*opened.lock().unwrap(), ["https://github.com/andriyanto/gridku/releases"]);
     }
 }

@@ -134,9 +134,9 @@ fn rotation_keeps_the_previous_logs_and_starts_an_empty_file() {
         std::fs::write(&path, format!("run {run}")).expect("write");
     }
     assert_eq!(read(&dir.join(LOG_FILE)), "run 4");
-    assert_eq!(read(&dir.join("gridcraft.1.log")), "run 3");
-    assert_eq!(read(&dir.join("gridcraft.2.log")), "run 2");
-    assert!(!dir.join("gridcraft.3.log").exists(), "only {KEEP} old logs are kept");
+    assert_eq!(read(&dir.join("gridku.1.log")), "run 3");
+    assert_eq!(read(&dir.join("gridku.2.log")), "run 2");
+    assert!(!dir.join("gridku.3.log").exists(), "only {KEEP} old logs are kept");
     let _ = std::fs::remove_dir_all(&dir);
 }
 
@@ -239,7 +239,7 @@ fn the_logger_filters_records_and_writes_them_to_the_attached_file() {
     assert!(!logger.enabled(&log::Metadata::builder().level(log::Level::Info).target("naga").build()));
     // Attaching again rotates: the first log becomes `.1`.
     logger.attach_dir(&dir).expect("attach again");
-    assert_eq!(read(&dir.join("gridcraft.1.log")), text);
+    assert_eq!(read(&dir.join("gridku.1.log")), text);
     let _ = std::fs::remove_dir_all(&dir);
 }
 

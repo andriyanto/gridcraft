@@ -359,7 +359,7 @@ pub(super) fn translate(text: &str) -> Option<&'static str> {
         "Command\nPalette" => "Komut\nPaleti",
         "Agent\nControl" => "Ajan\nKontrolü",
         "Action\nJournal" => "İşlem\nGünlüğü",
-        "About\nGridCraft" => "GridCraft\nHakkında",
+        "About\nGridKu" => "GridKu\nHakkında",
         "Share" => "Paylaş",
         "Add Chart\nElement" => "Grafik Öğesi\nEkle",
         "Change\nChart Type" => "Grafik Türünü\nDeğiştir",

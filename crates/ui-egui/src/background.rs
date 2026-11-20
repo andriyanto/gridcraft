@@ -349,7 +349,7 @@ impl SheetApp {
                     // The entry was not made: its draft is open again, in its window.
                     self.follow_active_window();
                     if !stopped {
-                        self.message = Some(("GridCraft".into(), clean_error(&e)));
+                        self.message = Some(("GridKu".into(), clean_error(&e)));
                     }
                     if self.editor.is_none() {
                         // Its text field went away with it: it takes the keyboard again, with

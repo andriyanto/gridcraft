@@ -13,7 +13,7 @@ fn text_to_columns_preserves_doubled_quotes() {
         ),
     )
     .expect("write commands");
-    let output = Command::new(env!("CARGO_BIN_EXE_gridcraft-cli"))
+    let output = Command::new(env!("CARGO_BIN_EXE_gridku-cli"))
         .args(["run", "--script"])
         .arg(&script)
         .args(["--print", "A1:B1", "--csv", "--quiet"])

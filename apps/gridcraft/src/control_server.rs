@@ -61,14 +61,14 @@ fn make_token(port: u16, chosen: Option<String>) -> std::io::Result<String> {
         if t.len() < control_auth::MIN_TOKEN_LEN {
             return Err(std::io::Error::other(format!("the control token must have at least {} characters", control_auth::MIN_TOKEN_LEN)));
         }
-        eprintln!("gridcraft: control channel on 127.0.0.1:{port} requires the token you set (clients: GRIDCRAFT_CONTROL_TOKEN)");
+        eprintln!("gridku: control channel on 127.0.0.1:{port} requires the token you set (clients: GRIDCRAFT_CONTROL_TOKEN)");
         return Ok(t);
     }
     let mut bytes = [0u8; 32];
     getrandom::fill(&mut bytes).map_err(|e| std::io::Error::other(format!("no random numbers for the control token: {e}")))?;
     let token = control_auth::hex(&bytes);
     let path = control_auth::write_token_file(port, &token)?;
-    eprintln!("gridcraft: control channel on 127.0.0.1:{port}; its token is in {} (gridcraft-cli reads it)", path.display());
+    eprintln!("gridku: control channel on 127.0.0.1:{port}; its token is in {} (gridku-cli reads it)", path.display());
     Ok(token)
 }
 

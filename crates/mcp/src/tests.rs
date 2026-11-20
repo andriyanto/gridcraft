@@ -62,7 +62,7 @@ fn initialize_and_version_negotiation() {
         rpc(&mut s, 1, "initialize", json!({"protocolVersion": PROTOCOL_VERSION, "capabilities": {}, "clientInfo": {"name": "t", "version": "1"}}));
     let r = &v["result"];
     assert_eq!(r["protocolVersion"], PROTOCOL_VERSION);
-    assert_eq!(r["serverInfo"]["name"], "gridcraft");
+    assert_eq!(r["serverInfo"]["name"], "gridku");
     assert!(r["capabilities"]["tools"].is_object());
     assert!(r["capabilities"]["resources"].is_object());
     assert!(r["instructions"].as_str().unwrap().contains("headless"));

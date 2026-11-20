@@ -27,7 +27,7 @@ fn confines() -> bool {
 }
 
 fn cli(args: &[&str]) -> Output {
-    Command::new(env!("CARGO_BIN_EXE_gridcraft-cli")).args(args).output().unwrap()
+    Command::new(env!("CARGO_BIN_EXE_gridku-cli")).args(args).output().unwrap()
 }
 
 fn text(o: &Output) -> String {
@@ -51,7 +51,7 @@ fn cat() -> &'static str {
 fn the_self_test_finds_every_denial() {
     // A home directory of the test's own, so the home-directory attempt always runs.
     let home = scratch("home");
-    let o = Command::new(env!("CARGO_BIN_EXE_gridcraft-cli")).arg("sandbox-check").env("HOME", &home).output().unwrap();
+    let o = Command::new(env!("CARGO_BIN_EXE_gridku-cli")).arg("sandbox-check").env("HOME", &home).output().unwrap();
     let out = text(&o);
     if !cfg!(any(target_os = "linux", target_os = "macos")) {
         assert_eq!(o.status.code(), Some(2), "{out}");
@@ -120,7 +120,7 @@ fn a_launch_whose_check_fails_runs_nothing() {
         "--exec".into(),
         echo.into(),
         "--exec".into(),
-        env!("CARGO_BIN_EXE_gridcraft-cli").into(),
+        env!("CARGO_BIN_EXE_gridku-cli").into(),
     ];
     for lib in ["/lib", "/lib64", "/usr/lib", "/usr/lib64"].into_iter().filter(|d| Path::new(d).exists()) {
         launch.extend(["--exec".to_string(), lib.into()]);
@@ -142,7 +142,7 @@ fn a_launch_whose_check_fails_runs_nothing() {
         launch.splice(0..2, ["--sandbox-launch".to_string()]);
         // The launcher may be under a folder in the list, on either system.
         let mut by_folder = launch.clone();
-        by_folder[4] = Path::new(env!("CARGO_BIN_EXE_gridcraft-cli")).parent().unwrap().to_string_lossy().into_owned();
+        by_folder[4] = Path::new(env!("CARGO_BIN_EXE_gridku-cli")).parent().unwrap().to_string_lossy().into_owned();
         let o = cli(&by_folder.iter().map(String::as_str).collect::<Vec<_>>());
         assert!(o.status.success(), "{}", text(&o));
         assert!(text(&o).contains("the program ran"), "{}", text(&o));
@@ -344,7 +344,7 @@ fn a_confined_program_inherits_no_secrets() {
         return;
     }
     let env = if Path::new("/usr/bin/env").exists() { "/usr/bin/env" } else { "/bin/env" };
-    let o = Command::new(env!("CARGO_BIN_EXE_gridcraft-cli"))
+    let o = Command::new(env!("CARGO_BIN_EXE_gridku-cli"))
         .args(["sandbox-check", "--", env])
         .env("GRIDCRAFT_CONTROL_TOKEN", "secret-token")
         .env("AWS_SECRET_ACCESS_KEY", "secret-key")
@@ -369,7 +369,7 @@ fn an_inherited_descriptor_never_reaches_the_program() {
     }
     let outside = scratch("leak");
     let leaked = outside.join("allowed.txt").to_string_lossy().into_owned();
-    let cli = env!("CARGO_BIN_EXE_gridcraft-cli");
+    let cli = env!("CARGO_BIN_EXE_gridku-cli");
     // The shell opens fd 9 (not close-on-exec) and then becomes the command, which inherits it. The
     // confined shell then tries to read through it, with a built-in: starting `cat` is refused. Not
     // fd 3: on macOS the system's libraries hold a socket of their own there under the sandbox.

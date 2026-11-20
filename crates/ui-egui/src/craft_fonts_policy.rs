@@ -126,7 +126,7 @@ pub fn check_declared_scripts(rows: &[ManifestRow]) -> Result<(), String> {
                 ));
             }
         } else if REQUIRED_FACES.iter().chain(CHINESE_FACES.iter()).any(|(family, _, _)| *family == row.family) {
-            return Err(format!("{} has an unexpected style {:?}; GridCraft only permits the exact required faces", row.family, row.style));
+            return Err(format!("{} has an unexpected style {:?}; GridKu only permits the exact required faces", row.family, row.style));
         }
     }
     Ok(())

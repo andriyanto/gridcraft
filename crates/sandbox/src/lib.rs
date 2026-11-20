@@ -52,7 +52,7 @@ pub const CONFINED_FLAG: &str = "--sandbox-confined";
 /// The first argument of the child the enforcement check tries to start; it exits at once.
 pub const PROBE_CHILD_FLAG: &str = "--sandbox-probe-child";
 /// The first argument of a confined run that reports what it may and may not do
-/// (`gridcraft-cli sandbox-check`).
+/// (`gridku-cli sandbox-check`).
 pub const REPORT_FLAG: &str = "--sandbox-report";
 /// The exit code of a launcher that refused to run its program.
 pub const REFUSED_EXIT_CODE: i32 = 97;
@@ -176,7 +176,7 @@ use unsupported as platform;
 mod unsupported {
     use super::{Command, OsString, Path, Result, SandboxError, Support, policy::Checked};
 
-    const WHY: &str = "GridCraft confines programs on Linux and macOS only";
+    const WHY: &str = "GridKu confines programs on Linux and macOS only";
 
     pub fn support() -> Support {
         Support::Unsupported(WHY.into())

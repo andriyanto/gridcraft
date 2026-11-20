@@ -1,4 +1,4 @@
-//! GridCraft's egui frontend: an Excel-style window (title bar with Quick Access Toolbar,
+//! GridKu's egui frontend: an Excel-style window (title bar with Quick Access Toolbar,
 //! ribbon, formula bar, grid, sheet tabs, status bar) over `gridcraft-engine`.
 //!
 //! The UI is thin: it reads engine state and acts through [`SheetApp::run`] (engine commands by
@@ -6,23 +6,33 @@
 #![deny(clippy::unwrap_used, clippy::expect_used, clippy::panic, clippy::unimplemented, clippy::todo, clippy::unreachable)]
 #![forbid(unsafe_code)]
 
-/// The GitHub repository this GridCraft's releases come from: the only place it looks for a newer
-/// version, and the only place an update is downloaded from. This copy is developed on its own,
-/// so that is its own repository, not the one craft-update lists for the Craft App Suite: a build
-/// of this code offered the releases of the project it was copied from.
-#[cfg(not(target_arch = "wasm32"))]
-pub const UPDATE_REPO: &str = "andriyanto/gridcraft";
+/// The GitHub repository GridKu's releases come from: the only place it looks for a newer
+/// version, and the only place an update is downloaded from. GridKu is its own project (it
+/// started from GridCraft), so that is its own repository, not the one craft-update lists for the
+/// Craft App Suite.
+pub const UPDATE_REPO: &str = "andriyanto/gridku";
+/// GridKu's page: its repository.
+pub const REPO_URL: &str = "https://github.com/andriyanto/gridku";
+/// Where GridKu's releases are downloaded.
+pub const RELEASES_URL: &str = "https://github.com/andriyanto/gridku/releases";
 
-/// GridCraft as craft-update knows it, with its 128 px icon and accent colour: the update
+/// GridKu as craft-update knows it, with its 128 px icon and accent colour: the update
 /// prompt shows both, and an AppImage's menu entry gets the icon. Its releases, and who the
 /// prompt says they are by, are this repository's ([`UPDATE_REPO`]).
 #[cfg(not(target_arch = "wasm32"))]
 pub const UPDATE_APP: craft_update::app::App = craft_update::app::App {
+    // The programs are `gridku` and `gridku-cli`, and release assets are named `gridku-<version>-…`.
+    id: "gridku",
+    name: "GridKu",
+    tagline: "Spreadsheets and data",
+    // No release of this project carried another name: GridCraft's releases are another app's.
+    former_ids: &[],
+    former_names: &[],
     icon_png: Some(include_bytes!("../../../assets/app-icon/hicolor/128x128/apps/ai.storyteller.gridcraft.png")),
-    accent: Some([0x1f, 0x9d, 0x55]),
+    // The icon's brick red.
+    accent: Some([0xb5, 0x47, 0x2b]),
     repo: UPDATE_REPO,
     developer: "andriyanto",
-    ..craft_update::suite::GRIDCRAFT
 };
 
 pub mod background;

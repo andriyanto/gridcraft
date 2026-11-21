@@ -8,15 +8,15 @@
 //! releases page in the browser, where the person downloads the installer and runs it
 //! themselves, with the warning the system shows them.
 //!
-//! The check and the two windows are craft-update's (`check_for_update`, `StartupPrompt`,
+//! The check and the two windows come from the update module, `crates/update` (`check_for_update`, `StartupPrompt`,
 //! `CheckResultDialog`); what is left out is its self-update (`updater::Updater`).
 
 use std::sync::Arc;
 use std::sync::mpsc::{Receiver, TryRecvError, channel};
 use std::time::Duration;
 
-use craft_update::updater::Status;
-use craft_update::{CheckResultDialog, CheckResultResponse, Release, StartupPrompt, StartupPromptResponse};
+use gridcraft_update::updater::Status;
+use gridcraft_update::{CheckResultDialog, CheckResultResponse, Release, StartupPrompt, StartupPromptResponse};
 
 use crate::SheetApp;
 
@@ -54,7 +54,7 @@ impl Default for Runtime {
 /// The version this build compares releases with: its own, or the one `GRIDCRAFT_PRETEND_VERSION`
 /// names for this run (to see the prompt without waiting for a release).
 fn running_version() -> String {
-    craft_update::self_update::current_version(&crate::UPDATE_APP, VERSION).map_or_else(|| VERSION.to_string(), |v| v.to_string())
+    gridcraft_update::self_update::current_version(&crate::UPDATE_APP, VERSION).map_or_else(|| VERSION.to_string(), |v| v.to_string())
 }
 
 /// The page Download Latest… opens: this repository's releases, the newest first.
@@ -65,9 +65,9 @@ pub(crate) fn download_page() -> String {
 
 /// The page Download opens for `release`: its own page when the link is a plain web link, else
 /// this repository's releases. (A `Release` can come from a cache or a feed, so its link is
-/// checked here as craft-update checks it.)
+/// checked here as the update module checks it.)
 fn page_of(release: &Release) -> String {
-    if craft_update::release::safe_web_link(&release.html_url) { release.html_url.clone() } else { crate::UPDATE_APP.releases_url() }
+    if gridcraft_update::release::safe_web_link(&release.html_url) { release.html_url.clone() } else { crate::UPDATE_APP.releases_url() }
 }
 
 /// Ask for a check; the next frame's `tick` starts it. A manual one reports every outcome.
@@ -93,8 +93,8 @@ impl Runtime {
         let spawned = std::thread::Builder::new().name("update-check".into()).spawn(move || {
             let ask = || match source {
                 Some(ask) => ask(),
-                None => craft_update::Http::new(&format!("{}/Update", crate::UPDATE_APP.name))
-                    .and_then(|http| craft_update::check_for_update(&crate::UPDATE_APP, &http, &version)),
+                None => gridcraft_update::Http::new(&format!("{}/Update", crate::UPDATE_APP.name))
+                    .and_then(|http| gridcraft_update::check_for_update(&crate::UPDATE_APP, &http, &version)),
             };
             let answer =
                 std::panic::catch_unwind(std::panic::AssertUnwindSafe(ask)).unwrap_or_else(|_| Err("the update check failed unexpectedly".into()));
@@ -193,11 +193,11 @@ mod tests {
     use super::*;
 
     /// This copy is developed on its own: a build of it looks for the releases of its own
-    /// repository, never those of the project craft-update lists as GridCraft.
+    /// repository, never those of the project the update module lists as GridCraft.
     #[test]
     fn updates_come_from_this_repository() {
         assert_eq!(crate::UPDATE_APP.repo, "andriyanto/gridku");
-        assert_ne!(crate::UPDATE_APP.repo, craft_update::suite::GRIDCRAFT.repo);
+        assert_ne!(crate::UPDATE_APP.repo, gridcraft_update::suite::GRIDCRAFT.repo);
         assert_eq!(crate::UPDATE_APP.developer, "andriyanto");
         // GridKu is an app of its own: its release files are named `gridku-<version>-…`.
         assert_eq!(crate::UPDATE_APP.id, "gridku");
@@ -297,7 +297,7 @@ mod tests {
         for odd in ["file:///C:/Windows/System32/calc.exe", "javascript:alert(1)", "", "http://example.com/x"] {
             let page = page_of(&release(odd));
             assert!(page == odd || page == "https://github.com/andriyanto/gridku/releases", "{odd} → {page}");
-            assert!(craft_update::release::safe_web_link(&page), "{odd} → {page}");
+            assert!(gridcraft_update::release::safe_web_link(&page), "{odd} → {page}");
         }
     }
 

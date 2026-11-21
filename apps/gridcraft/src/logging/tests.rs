@@ -101,7 +101,7 @@ fn timestamps_are_utc_with_milliseconds() {
     assert_eq!(timestamp(UNIX_EPOCH + Duration::from_secs(4_107_542_400)), "2100-03-01T00:00:00.000Z");
     // Before the epoch (a clock set wrong) clamps instead of panicking.
     assert_eq!(timestamp(UNIX_EPOCH - Duration::from_secs(5)), "1970-01-01T00:00:00.000Z");
-    // A clock set absurdly far ahead (past chrono's own range) keeps its real year rather than
+    // A clock set absurdly far ahead (past jiff's own range) keeps its real year rather than
     // collapsing to the epoch. Windows' SystemTime can't hold such an instant, so it is built
     // with a checked add and only asserted where it exists.
     if let Some(far) = UNIX_EPOCH.checked_add(Duration::from_secs(u64::MAX / 2)) {

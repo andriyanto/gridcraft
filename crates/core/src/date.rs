@@ -30,28 +30,29 @@ pub struct DateTime {
 
 /// Days since 1970-01-01 for a proleptic Gregorian date, exact for every `i32` year.
 ///
-/// `NaiveDate` only covers about ±262143 years, but the Gregorian calendar repeats every 400
-/// years (146_097 days): chrono converts the year within its cycle and whole cycles are added
-/// back as days (an i128 so the i32 extremes can't overflow). 1970-01-01 is `num_days_from_ce`
-/// 719_163; the result matches the proleptic Gregorian count the old hand-rolled code gave.
+/// jiff's dates only cover years -9999..=9999, but the Gregorian calendar repeats every 400
+/// years (146_097 days): jiff converts the year within its cycle and whole cycles are added back
+/// as days (an i128 so the i32 extremes can't overflow). The result matches the proleptic
+/// Gregorian count the old hand-rolled code gave.
 pub fn days_from_civil(y: i32, m: u32, d: u32) -> i64 {
     let (cycles, year) = (i128::from(i64::from(y).div_euclid(400)), i64::from(y).rem_euclid(400));
-    i32::try_from(year)
+    let (Ok(year), Ok(m), Ok(d)) = (i16::try_from(year), i8::try_from(m), i8::try_from(d)) else { return 0 };
+    jiff::civil::Date::new(year, m, d)
         .ok()
-        .and_then(|year| chrono::NaiveDate::from_ymd_opt(year, m, d))
         .and_then(|date| {
-            let days = i128::from(chrono::Datelike::num_days_from_ce(&date)) - 719_163 + cycles * 146_097;
-            i64::try_from(days).ok()
+            // Whole days: both dates are midnights, so the duration is a multiple of 86 400 s.
+            let days = date.duration_since(jiff::civil::Date::constant(1970, 1, 1)).as_secs() / 86_400;
+            i64::try_from(i128::from(days) + cycles * 146_097).ok()
         })
         .unwrap_or(0)
 }
 
 /// Milliseconds since the Unix epoch (UTC) from the system clock; `None` when the clock is unavailable.
-/// Chrono uses the browser clock on wasm32, where the standard library clock methods trap.
+/// The browser clock on wasm32, where the standard library clock methods trap.
 pub fn unix_now_ms() -> Option<f64> {
     #[cfg(not(target_arch = "wasm32"))]
     {
-        Some(chrono::Utc::now().timestamp_millis() as f64)
+        Some(jiff::Timestamp::now().as_millisecond() as f64)
     }
     #[cfg(target_arch = "wasm32")]
     {
@@ -75,20 +76,23 @@ pub fn serial_in_system(sys: DateSystem, serial_1900: f64) -> f64 {
 /// Proleptic Gregorian `(year, month, day)` for a day count `z` since 1970-01-01 (the inverse of
 /// [`days_from_civil`]).
 ///
-/// The calendar repeats every 400 years (146_097 days): chrono converts the day within its cycle
+/// The calendar repeats every 400 years (146_097 days): jiff converts the day within its cycle
 /// and whole cycles go back into the year (an i128 so no `z` overflows), which matches the
-/// proleptic Gregorian answer the old hand-rolled code gave past `NaiveDate`'s ±262143 range.
-/// 1970-01-01 is `num_days_from_ce` 719_163.
+/// proleptic Gregorian answer the old hand-rolled code gave past jiff's ±9999-year range.
 pub fn civil_from_days(z: i64) -> (i32, u32, u32) {
-    use chrono::Datelike;
     let (cycles, rest) = (z.div_euclid(146_097), z.rem_euclid(146_097));
-    match i32::try_from(rest + 719_163).ok().and_then(chrono::NaiveDate::from_num_days_from_ce_opt) {
-        Some(d) => {
+    // `rest` is 0..146_097: 1970-01-01 up to 2369, always inside jiff's range.
+    match jiff::civil::Date::constant(1970, 1, 1).checked_add(jiff::SignedDuration::from_secs(rest * 86_400)) {
+        Ok(d) => {
             let y = i128::from(d.year()) + i128::from(cycles) * 400;
-            (i32::try_from(y).unwrap_or(if y < 0 { i32::MIN } else { i32::MAX }), d.month(), d.day())
+            (
+                i32::try_from(y).unwrap_or(if y < 0 { i32::MIN } else { i32::MAX }),
+                u32::from(d.month().unsigned_abs()),
+                u32::from(d.day().unsigned_abs()),
+            )
         }
-        // Unreachable: `rest + 719_163` is always a valid CE day.
-        None => (1970, 1, 1),
+        // Unreachable: see above.
+        Err(_) => (1970, 1, 1),
     }
 }
 
@@ -98,9 +102,9 @@ const UNIX_1904_01_01: i64 = -24107;
 /// Whether `y` is a Gregorian leap year, for every `i32` year.
 pub fn is_leap(y: i32) -> bool {
     // A year is a leap year iff 29 February exists in it. Leap years repeat every 400 years, so
-    // the year within its Gregorian cycle (`rem_euclid(400)`) decides it and always fits chrono.
-    let y = i64::from(y).rem_euclid(400) as i32;
-    chrono::NaiveDate::from_ymd_opt(y, 2, 29).is_some()
+    // the year within its Gregorian cycle (`rem_euclid(400)`) decides it and always fits jiff.
+    let y = i64::from(y).rem_euclid(400) as i16;
+    jiff::civil::Date::new(y, 2, 29).is_ok()
 }
 
 /// Number of days in month `m` of year `y` (1–31), or `0` for an invalid month number, for every
@@ -108,16 +112,12 @@ pub fn is_leap(y: i32) -> bool {
 pub fn days_in_month(y: i32, m: u32) -> u32 {
     // The length of a month is the day before the first of the next month. Month lengths repeat
     // every 400 years, so the year within its Gregorian cycle (`rem_euclid(400)`) is enough and
-    // always fits chrono (so December can't overflow `y + 1`). An invalid month keeps the old `0`.
+    // always fits jiff. An invalid month keeps the old `0`.
     if !(1..=12).contains(&m) {
         return 0;
     }
-    let y = i64::from(y).rem_euclid(400) as i32;
-    let first = |y: i32, m: u32| chrono::NaiveDate::from_ymd_opt(y, m, 1);
-    match (first(y, m), if m == 12 { first(y + 1, 1) } else { first(y, m + 1) }) {
-        (Some(a), Some(b)) => u32::try_from((b - a).num_days()).unwrap_or(0),
-        _ => 0,
-    }
+    let (y, m) = (i64::from(y).rem_euclid(400) as i16, m as i8);
+    jiff::civil::Date::new(y, m, 1).map_or(0, |first| u32::from(first.days_in_month().unsigned_abs()))
 }
 
 /// Days in a month of a date system's calendar: like [`days_in_month`], except that February
@@ -231,13 +231,13 @@ mod tests {
     }
 
     #[test]
-    fn leap_and_month_length_outside_chrono_range() {
+    fn leap_and_month_length_outside_jiff_range() {
         // In range, the ordinary Gregorian rule holds.
         assert!(is_leap(2000));
         assert!(!is_leap(1900));
         assert!(is_leap(2024));
         assert!(!is_leap(2023));
-        // Outside chrono's NaiveDate range the Gregorian rule is still applied.
+        // Outside jiff's range the Gregorian rule is still applied.
         assert!(is_leap(400_000)); // divisible by 400
         assert!(!is_leap(300_100)); // century not divisible by 400
         assert!(is_leap(i32::MAX - 3)); // 2147483644 is divisible by 4, not a century
@@ -257,7 +257,7 @@ mod tests {
     }
 
     #[test]
-    fn civil_conversions_exact_beyond_chrono_range() {
+    fn civil_conversions_exact_beyond_jiff_range() {
         assert_eq!(days_from_civil(1970, 1, 1), 0);
         assert_eq!(civil_from_days(0), (1970, 1, 1));
         // Past `NaiveDate`'s ±262143 the 400-year cycles carry the result, exactly, both sides of
@@ -279,7 +279,7 @@ mod tests {
     #[test]
     fn serials_unchanged_through_cycle_conversion() {
         // The 1900 leap bug and 1904 semantics must stay exact; the converters only ever see
-        // in-range years here, so the serial outputs are byte-for-byte the pre-chrono ones.
+        // in-range years here, so the serial outputs are byte-for-byte the pre-chrono ones (and the chrono ones before jiff).
         let s = DateSystem::D1900;
         assert_eq!(serial_from_ymd(s, 1900, 2, 29), Some(60.0)); // Excel's fictitious leap day
         assert_eq!(serial_from_ymd(s, 1900, 3, 1), Some(61.0));

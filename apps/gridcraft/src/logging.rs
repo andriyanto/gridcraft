@@ -93,33 +93,31 @@ fn matches(name: &str, target: &str) -> bool {
 }
 
 /// `2026-10-08T07:59:17.728Z` (UTC, milliseconds). A clock before 1970 reads as the epoch; a clock
-/// set absurdly far ahead keeps its real year (years far outside chrono's own range are preserved)
+/// set absurdly far ahead keeps its real year (years far outside jiff's own range are preserved)
 /// instead of panicking.
 pub fn timestamp(t: SystemTime) -> String {
     let since = t.duration_since(std::time::UNIX_EPOCH).unwrap_or_default();
-    let (y, dt) = utc_parts(since.as_secs(), since.subsec_nanos());
+    let (y, m, d) = utc_date(since.as_secs());
+    let sod = since.as_secs() % 86_400;
     // `{:04}` rather than `%Y`, which writes a `+` before years past 9999.
-    format!("{y:04}-{}", dt.format("%m-%dT%H:%M:%S%.3fZ"))
+    format!("{y:04}-{m:02}-{d:02}T{:02}:{:02}:{:02}.{:03}Z", sod / 3600, sod / 60 % 60, sod % 60, since.subsec_millis())
 }
 
-/// Unix seconds (+ nanos) → (proleptic Gregorian year, the same wall-clock instant moved into
-/// chrono's range by whole 400-year cycles). The Gregorian calendar repeats every 400 years
-/// (146_097 days), so month, day and time of day come from chrono and only the year is carried,
-/// which keeps every input exact instead of collapsing out-of-range years to the epoch. `secs` is
-/// `u64` (the clock is clamped at the epoch before 1970), so `days` always fits an `i64`.
-fn utc_parts(secs: u64, nanos: u32) -> (i64, chrono::NaiveDateTime) {
-    use chrono::Datelike;
-    let (days, sod) = ((secs / 86_400) as i64, (secs % 86_400) as i64);
+/// Unix seconds → proleptic Gregorian (year, month, day). The Gregorian calendar repeats every
+/// 400 years (146_097 days), so month and day come from jiff within one cycle and only the year
+/// is carried, which keeps every input exact instead of collapsing out-of-range years to the
+/// epoch. `secs` is `u64` (the clock is clamped at the epoch before 1970), so `days` always fits
+/// an `i64`.
+fn utc_date(secs: u64) -> (i64, u8, u8) {
+    let days = (secs / 86_400) as i64;
     let (cycles, rest) = (days.div_euclid(146_097), days.rem_euclid(146_097));
-    // `rest + 719_163` (1970-01-01 is CE day 719_163) is always a valid CE day, and `sod` < 86_400.
-    let date = i32::try_from(rest + 719_163).ok().and_then(chrono::NaiveDate::from_num_days_from_ce_opt);
-    let time = u32::try_from(sod).ok().and_then(|s| chrono::NaiveTime::from_num_seconds_from_midnight_opt(s, nanos.min(999_999_999)));
-    match (date, time) {
-        (Some(d), Some(t)) => {
+    // `rest` is 0..146_097: 1970-01-01 up to 2369, always inside jiff's range.
+    match jiff::civil::Date::constant(1970, 1, 1).checked_add(jiff::SignedDuration::from_secs(rest * 86_400)) {
+        Ok(d) => {
             let y = i128::from(d.year()) + i128::from(cycles) * 400;
-            (i64::try_from(y).unwrap_or(i64::MAX), d.and_time(t))
+            (i64::try_from(y).unwrap_or(i64::MAX), d.month().unsigned_abs(), d.day().unsigned_abs())
         }
-        _ => (1970, chrono::NaiveDateTime::default()), // unreachable
+        Err(_) => (1970, 1, 1), // unreachable
     }
 }
 

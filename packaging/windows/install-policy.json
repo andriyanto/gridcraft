@@ -1,7 +1,7 @@
 {
-  "id": "gridcraft",
-  "name": "GridCraft",
-  "upgradeCode": "5511327B-F305-41BE-92D0-EB84944E7C4D",
+  "id": "gridku",
+  "name": "GridKu",
+  "upgradeCode": "E325A24A-2E56-418F-AED8-6E08B6CB2D6B",
   "sources": [
     "gridcraft.wxs"
   ],
@@ -9,139 +9,139 @@
   "localization": [],
   "extensions": [],
   "payloads": [
-    "gridcraft-cli.exe",
-    "gridcraft.exe"
+    "gridku-cli.exe",
+    "gridku.exe"
   ],
   "registry": [
     [
       "-1",
-      "Software\\Microsoft\\Windows\\CurrentVersion\\App Paths\\gridcraft.exe",
+      "Software\\Microsoft\\Windows\\CurrentVersion\\App Paths\\gridku.exe",
       "",
       "[#GridcraftExe]"
     ],
     [
       "-1",
-      "Software\\Classes\\GridCraft.Workbook",
+      "Software\\Classes\\GridKu.Workbook",
       "",
-      "GridCraft Workbook"
+      "GridKu Workbook"
     ],
     [
       "-1",
-      "Software\\Classes\\GridCraft.Workbook\\DefaultIcon",
+      "Software\\Classes\\GridKu.Workbook\\DefaultIcon",
       "",
       "\"[#GridcraftExe]\",0"
     ],
     [
       "-1",
-      "Software\\Classes\\GridCraft.Workbook\\shell\\open\\command",
+      "Software\\Classes\\GridKu.Workbook\\shell\\open\\command",
       "",
       "\"[#GridcraftExe]\" \"%1\""
     ],
     [
       "-1",
-      "Software\\Classes\\GridCraft.TextData",
+      "Software\\Classes\\GridKu.TextData",
       "",
-      "GridCraft Text Data"
+      "GridKu Text Data"
     ],
     [
       "-1",
-      "Software\\Classes\\GridCraft.TextData\\DefaultIcon",
+      "Software\\Classes\\GridKu.TextData\\DefaultIcon",
       "",
       "\"[#GridcraftExe]\",0"
     ],
     [
       "-1",
-      "Software\\Classes\\GridCraft.TextData\\shell\\open\\command",
+      "Software\\Classes\\GridKu.TextData\\shell\\open\\command",
       "",
       "\"[#GridcraftExe]\" \"%1\""
     ],
     [
       "-1",
       "Software\\Classes\\.xlsx\\OpenWithProgids",
-      "GridCraft.Workbook",
-      "GridCraft.Workbook"
+      "GridKu.Workbook",
+      "GridKu.Workbook"
     ],
     [
       "-1",
       "Software\\Classes\\.xlsm\\OpenWithProgids",
-      "GridCraft.Workbook",
-      "GridCraft.Workbook"
+      "GridKu.Workbook",
+      "GridKu.Workbook"
     ],
     [
       "-1",
       "Software\\Classes\\.xlsb\\OpenWithProgids",
-      "GridCraft.Workbook",
-      "GridCraft.Workbook"
+      "GridKu.Workbook",
+      "GridKu.Workbook"
     ],
     [
       "-1",
       "Software\\Classes\\.ods\\OpenWithProgids",
-      "GridCraft.Workbook",
-      "GridCraft.Workbook"
+      "GridKu.Workbook",
+      "GridKu.Workbook"
     ],
     [
       "-1",
       "Software\\Classes\\.csv\\OpenWithProgids",
-      "GridCraft.TextData",
-      "GridCraft.TextData"
+      "GridKu.TextData",
+      "GridKu.TextData"
     ],
     [
       "-1",
       "Software\\Classes\\.tsv\\OpenWithProgids",
-      "GridCraft.TextData",
-      "GridCraft.TextData"
+      "GridKu.TextData",
+      "GridKu.TextData"
     ],
     [
       "-1",
-      "Software\\GridCraft\\Capabilities",
+      "Software\\GridKu\\Capabilities",
       "ApplicationName",
-      "GridCraft"
+      "GridKu"
     ],
     [
       "-1",
-      "Software\\GridCraft\\Capabilities",
+      "Software\\GridKu\\Capabilities",
       "ApplicationDescription",
       "Open-source spreadsheet for .xlsx, CSV and TSV files"
     ],
     [
       "-1",
-      "Software\\GridCraft\\Capabilities\\FileAssociations",
+      "Software\\GridKu\\Capabilities\\FileAssociations",
       ".xlsx",
-      "GridCraft.Workbook"
+      "GridKu.Workbook"
     ],
     [
       "-1",
-      "Software\\GridCraft\\Capabilities\\FileAssociations",
+      "Software\\GridKu\\Capabilities\\FileAssociations",
       ".xlsm",
-      "GridCraft.Workbook"
+      "GridKu.Workbook"
     ],
     [
       "-1",
-      "Software\\GridCraft\\Capabilities\\FileAssociations",
+      "Software\\GridKu\\Capabilities\\FileAssociations",
       ".csv",
-      "GridCraft.TextData"
+      "GridKu.TextData"
     ],
     [
       "-1",
-      "Software\\GridCraft\\Capabilities\\FileAssociations",
+      "Software\\GridKu\\Capabilities\\FileAssociations",
       ".tsv",
-      "GridCraft.TextData"
+      "GridKu.TextData"
     ],
     [
       "-1",
       "Software\\RegisteredApplications",
-      "GridCraft",
-      "Software\\GridCraft\\Capabilities"
+      "GridKu",
+      "Software\\GridKu\\Capabilities"
     ],
     [
       "-1",
-      "Software\\GridCraft\\Installer",
+      "Software\\GridKu\\Installer",
       "DesktopShortcut",
       "[DESKTOPSHORTCUT]"
     ],
     [
       "-1",
-      "Software\\GridCraft\\Installer",
+      "Software\\GridKu\\Installer",
       "DesktopShortcutComponent",
       "#1"
     ]

@@ -4,8 +4,14 @@ version.workspace = true
 edition.workspace = true
 license.workspace = true
 publish = false
-default-run = "gridcraft"
-description = "GridCraft desktop app"
+default-run = "gridku"
+description = "GridKu desktop app"
+
+# The program is `gridku` (`gridku.exe`); the package keeps its name, so `cargo run -p gridcraft`
+# still builds and starts it.
+[[bin]]
+name = "gridku"
+path = "src/main.rs"
 
 [lints]
 workspace = true

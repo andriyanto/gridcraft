@@ -704,10 +704,11 @@ fn about_says_where_this_copy_comes_from() {
     h.state_mut().open_dialog("about", json!({}));
     h.run_steps(3);
     for line in [
-        "Get this build: github.com/andriyanto/gridcraft/releases",
-        "Source code of this build: github.com/andriyanto/gridcraft",
-        "Source code: github.com/storytold/gridcraft",
-        "Disclaimer: this copy of GridCraft has been modified from the original. It is not an official ArtCraft release.",
+        "GridKu is a modified version of GridCraft, by andriyanto.",
+        "GridKu on GitHub: github.com/andriyanto/gridku",
+        "Downloads: github.com/andriyanto/gridku/releases",
+        "Original project: github.com/storytold/gridcraft",
+        "GridKu is not an official ArtCraft release and is not endorsed by the ArtCraft team.",
     ] {
         assert!(h.query_by_label(line).is_some(), "About shows: {line}");
     }

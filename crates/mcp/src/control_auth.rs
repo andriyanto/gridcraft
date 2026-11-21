@@ -69,15 +69,15 @@ pub fn check_first_line(line: &str, token: &str) -> Result<Value, Value> {
 }
 
 /// Where the app writes the token it made for `port`, and where clients look for it: a folder
-/// only the user can open (`$XDG_RUNTIME_DIR/gridcraft`, else `~/.cache/gridcraft`; on Windows
-/// `%USERPROFILE%\.gridcraft`), file `control-<port>.token`. `None` when no such folder is known.
+/// only the user can open (`$XDG_RUNTIME_DIR/gridku`, else `~/.cache/gridku`; on Windows
+/// `%USERPROFILE%\.gridku`), file `control-<port>.token`. `None` when no such folder is known.
 pub fn token_path(port: u16) -> Option<PathBuf> {
     let dir = if cfg!(windows) {
-        PathBuf::from(std::env::var_os("USERPROFILE").filter(|v| !v.is_empty())?).join(".gridcraft")
+        PathBuf::from(std::env::var_os("USERPROFILE").filter(|v| !v.is_empty())?).join(".gridku")
     } else if let Some(run) = std::env::var_os("XDG_RUNTIME_DIR").filter(|v| !v.is_empty()) {
-        PathBuf::from(run).join("gridcraft")
+        PathBuf::from(run).join("gridku")
     } else {
-        PathBuf::from(std::env::var_os("HOME").filter(|v| !v.is_empty())?).join(".cache").join("gridcraft")
+        PathBuf::from(std::env::var_os("HOME").filter(|v| !v.is_empty())?).join(".cache").join("gridku")
     };
     Some(dir.join(format!("control-{port}.token")))
 }

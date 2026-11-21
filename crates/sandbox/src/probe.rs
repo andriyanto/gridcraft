@@ -1,5 +1,5 @@
 //! The enforcement check a confined launcher runs before it starts its program, and the fuller
-//! report `gridcraft-cli sandbox-check` prints.
+//! report `gridku-cli sandbox-check` prints.
 
 use std::ffi::OsString;
 use std::io::ErrorKind;
@@ -148,7 +148,7 @@ fn spawn_probe(exe: &Path) -> Outcome {
 /// `--sandbox-report <canary> [<readable file> [<home directory>]]`, run confined: prints one line per attempt,
 /// `denied: <name>` or `allowed: <name> (<detail>)`, then the attempts that must work, and exits
 /// with 0 when every line is as the sandbox requires, 1 otherwise. Used by
-/// `gridcraft-cli sandbox-check` and the tests.
+/// `gridku-cli sandbox-check` and the tests.
 pub fn report(args: &[OsString]) -> i32 {
     let (Some(canary), readable) = (args.first(), args.get(1)) else {
         eprintln!("gridcraft-sandbox: --sandbox-report needs the canary's path");

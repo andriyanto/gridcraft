@@ -13,8 +13,8 @@ The control port is reachable by every program on the machine, and by a web page
 (#777). **There is no way to turn this off.**
 
 - The app makes a token at start (256 random bits from the operating system, kept in memory) and
-  writes it to a file only you can read: `$XDG_RUNTIME_DIR/gridcraft/control-<port>.token` (else
-  `~/.cache/gridcraft/…`; Windows: `%USERPROFILE%\.gridcraft\…`; the folder is mode 0700 and the
+  writes it to a file only you can read: `$XDG_RUNTIME_DIR/gridku/control-<port>.token` (else
+  `~/.cache/gridku/…`; Windows: `%USERPROFILE%\.gridku\…`; the folder is mode 0700 and the
   file 0600 on Unix). The path is printed on stderr. The token itself is never printed or logged.
 - Or choose the token yourself: `GRIDCRAFT_CONTROL_TOKEN=…` (preferred) or `--control-token …`
   (visible in the process list), at least 16 characters. The app then writes no file.

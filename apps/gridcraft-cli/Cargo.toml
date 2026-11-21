@@ -9,8 +9,9 @@ publish = false
 [lints]
 workspace = true
 
+# The program is `gridku-cli`; the package keeps its name.
 [[bin]]
-name = "gridcraft-cli"
+name = "gridku-cli"
 path = "src/main.rs"
 
 [dependencies]

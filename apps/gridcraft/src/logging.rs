@@ -3,8 +3,8 @@
 //! Without a logger every `log::warn!`/`log::error!` in the workspace (a sample that failed to
 //! build, a graphics adapter warning, a panic a command's guard recovered from) vanished. A launch
 //! from a desktop menu has no terminal, so the file is what a bug report can attach:
-//! `<settings dir>/logs/gridcraft.log`, next to `ui.json` and `prefs.json` (`config_dir` in
-//! `main.rs`). Each start moves the previous log to `gridcraft.1.log` (and that one to `.2`), so
+//! `<settings dir>/logs/gridku.log`, next to `ui.json` and `prefs.json` (`config_dir` in
+//! `main.rs`). Each start moves the previous log to `gridku.1.log` (and that one to `.2`), so
 //! the log of a run that crashed survives the next launch. Runs without preferences
 //! (`GRIDCRAFT_NO_PREFS`) log to standard error only.
 //!
@@ -17,7 +17,7 @@
 //! written once the file is attached. Writing never panics: a file that can't be created or
 //! written leaves standard error as the only sink.
 //!
-//! This is the desktop app's logger only; `gridcraft-cli` and `gridcraft-web` set up their own.
+//! This is the desktop app's logger only; `gridku-cli` and `gridcraft-web` set up their own.
 
 use std::fs::File;
 use std::io::Write;
@@ -28,15 +28,15 @@ use std::time::SystemTime;
 use log::LevelFilter;
 
 /// The current log file's name inside the log directory.
-pub const LOG_FILE: &str = "gridcraft.log";
-/// How many previous logs are kept (`gridcraft.1.log` … `gridcraft.<KEEP>.log`).
+pub const LOG_FILE: &str = "gridku.log";
+/// How many previous logs are kept (`gridku.1.log` … `gridcraft.<KEEP>.log`).
 pub const KEEP: usize = 2;
 /// The log file stops growing past this size (a runaway warning can't fill the disk).
 pub const MAX_FILE_BYTES: u64 = 16 * 1024 * 1024;
 /// Records kept in memory until the log file is attached.
 pub const MAX_PENDING: usize = 512;
 /// The built-in filter when `RUST_LOG` is unset or empty.
-pub const DEFAULT_FILTER: &str = "warn,gridcraft*=info";
+pub const DEFAULT_FILTER: &str = "warn,gridcraft*=info,gridku*=info";
 
 /// Per-target level filter parsed from env_logger-style directives.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -124,7 +124,7 @@ fn utc_parts(secs: u64, nanos: u32) -> (i64, chrono::NaiveDateTime) {
 }
 
 fn numbered(dir: &Path, n: usize) -> PathBuf {
-    if n == 0 { dir.join(LOG_FILE) } else { dir.join(format!("gridcraft.{n}.log")) }
+    if n == 0 { dir.join(LOG_FILE) } else { dir.join(format!("gridku.{n}.log")) }
 }
 
 /// Shift the previous logs up one (`.log` → `.1.log` → … → `.<KEEP>.log`, the oldest dropped)

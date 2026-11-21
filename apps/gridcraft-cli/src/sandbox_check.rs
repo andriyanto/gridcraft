@@ -1,4 +1,4 @@
-//! `gridcraft-cli sandbox-check [--read PATH]... [--exec PATH]... [-- PROGRAM ARGS...]`: whether
+//! `gridku-cli sandbox-check [--read PATH]... [--exec PATH]... [-- PROGRAM ARGS...]`: whether
 //! this system confines programs, for a person or a reviewer checking a machine.
 //!
 //! Without a program it starts a confined copy of itself that tries what the sandbox must deny
@@ -20,7 +20,7 @@ pub fn main(args: &[String]) -> ExitCode {
     match run(args) {
         Ok(code) => code,
         Err(e) => {
-            eprintln!("gridcraft-cli: sandbox-check: {e}");
+            eprintln!("gridku-cli: sandbox-check: {e}");
             ExitCode::FAILURE
         }
     }

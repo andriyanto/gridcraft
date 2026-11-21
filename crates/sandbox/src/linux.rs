@@ -269,7 +269,7 @@ const FS_IOC_SET_ENCRYPTION_POLICY: u64 = 0x800C_6613;
 ///   kernel than the rest (ABI 6), and `kill(-1, 9)` must not get through on an older one.
 /// - A change to the limits, priority or scheduling of any process but `me`.
 /// - `TIOCSTI` and `TIOCLINUX`, which type into a terminal the program inherited, as when
-///   `gridcraft-cli sandbox-check` runs a program from a shell.
+///   `gridku-cli sandbox-check` runs a program from a shell.
 /// - An `ioctl` that hands the kernel data ([`IOC_WRITE`]), as those that change a file's flags or
 ///   attributes do (`FS_IOC_SETFLAGS`, `FS_IOC_FSSETXATTR`) on a descriptor opened only to read.
 ///   Landlock's rights don't cover them for files. Those that ask, as `isatty` does, and those that

@@ -1,383 +1,176 @@
 <p align="center">
-  <img src="assets/app-icon/hicolor/256x256/apps/ai.storyteller.gridcraft.png" width="128" height="128" alt="GridCraft icon: a spreadsheet page on a green tile">
+  <img src="assets/app-icon/hicolor/256x256/apps/ai.storyteller.gridcraft.png" alt="Ikon GridKu: huruf G hijau di atas buku terbuka bertuliskan Grid dan Ku, berlatar merah bata" width="128" height="128">
 </p>
 
-<h1 align="center">GridCraft</h1>
+<h1 align="center">GridKu</h1>
 
 <p align="center">
-  <b>Spreadsheets and data; an open-source, high-performance modern spreadsheet application, built in pure Rust.</b>
-</p>
-
-<p align="center">
-  A fast, open-source, clean-room take on modern spreadsheet workflows. It runs natively on macOS,
-  Windows, Linux and BSD, and in the browser via WebAssembly.<br>
-  <i>Based on GridCraft by the ArtCraft team.</i>
-</p>
-
-> [!IMPORTANT]
-> **This repository is an independently maintained, modified copy of GridCraft.** The original
-> project is [`storytold/gridcraft`](https://github.com/storytold/gridcraft) by the ArtCraft team.
-> The builds on this repository's [Releases page](https://github.com/andriyanto/gridcraft/releases)
-> are made by [@andriyanto](https://github.com/andriyanto), not by the ArtCraft team, which does
-> not endorse or support them. These builds are **not code-signed**: see
-> [Downloads](#downloads), [Code signing policy](#code-signing-policy) and [Privacy](#privacy).
-
-<p align="center">
-  <img alt="Written in Rust" src="https://img.shields.io/badge/written%20in-Rust-147a40?style=flat-square&logo=rust&logoColor=white">
-  <img alt="Runs on macOS, Windows, Linux, BSD and the web" src="https://img.shields.io/badge/runs%20on-macOS%20%C2%B7%20Windows%20%C2%B7%20Linux%20%C2%B7%20BSD%20%C2%B7%20Web-1f9d55?style=flat-square">
-  <img alt="License: MIT OR Apache-2.0" src="https://img.shields.io/badge/license-MIT%20%2F%20Apache--2.0-147a40?style=flat-square">
-  <img alt="Agent-drivable over MCP" src="https://img.shields.io/badge/agents-MCP-1f9d55?style=flat-square">
+  Spreadsheet sumber terbuka untuk menghitung, menganalisis, dan membuat grafik data.<br>
+  Membuka dan menyimpan .xlsx, berjalan luring, tanpa akun, tanpa telemetri.
 </p>
 
 <p align="center">
-  <a href="https://discord.gg/artcraft"><img alt="Join the ArtCraft community on Discord" src="https://img.shields.io/badge/Join%20us%20on%20Discord-5865F2?style=for-the-badge&logo=discord&logoColor=white" height="40"></a>
+  <img src="docs/images/gridku.png" alt="GridKu dengan contoh dasbor penjualan kuartalan: tabel bergaris selang-seling dengan baris total, data bar, ikon panah dan sparkline, di samping grafik kolom dan grafik pai." width="100%">
 </p>
 
-<p align="center">
-  <a href="https://getartcraft.com/apps/gridcraft"><b>GridCraft on getartcraft.com</b></a> ·
-  <a href="https://getartcraft.com/">ArtCraft</a> ·
-  <a href="https://getartcraft.com/apps">All Crafting Apps</a>
-</p>
+> **Status:** belum ada rilis bernama GridKu. Rilis yang sudah ada di halaman
+> [Releases](https://github.com/andriyanto/gridku/releases) masih bernama GridCraft. Installer
+> GridKu akan muncul di sana setelah rilis GridKu pertama. Sampai saat itu, GridKu bisa dibangun
+> dari kode sumber (lihat [Membangun dari kode sumber](#membangun-dari-kode-sumber)).
 
-<br>
+## Apa yang bisa dilakukan
 
-<p align="center">
-  <img src="docs/images/hero-sales.png" alt="GridCraft showing a quarterly sales dashboard: a styled table with banded rows, filter buttons, a totals row, data bars, arrow icons and sparklines, next to a clustered column chart and a pie chart" width="100%">
-  <br><sub><b>Quarterly Sales Dashboard</b>: a table with a totals row, conditional formatting, sparklines and two live charts — built entirely from GridCraft commands (<code>File → New → Sample</code>).</sub>
-</p>
+- **Akrab dipakai.** Ribbon, formula bar, Name Box, tab sheet, pintasan keyboard, fill handle,
+  referensi berwarna saat mengetik rumus, Format Cells, Paste Special.
+- **Rumus.** Lebih dari 500 fungsi lembar kerja, array dinamis yang tumpah ke sel sebelahnya,
+  LET, LAMBDA, MAP, REDUCE, referensi tabel terstruktur. Antarmuka berbahasa Spanyol juga
+  menerima nama fungsi Spanyol, koma desimal, dan pemisah titik koma.
+- **Format.** Format angka lengkap, style sel, format bersyarat (data bar, skala warna, ikon),
+  border, tema, mode gelap.
+- **Data.** Urutkan, AutoFilter, Flash Fill, validasi data, outline dan subtotal, tabel dengan
+  baris total, pivot table dengan pengelompokan tanggal.
+- **Grafik dan gambar.** Tujuh belas jenis grafik dengan tab Chart Design dan panel Format,
+  sparkline, gambar (juga gambar di dalam sel), bentuk, kotak teks, komentar, tautan.
+- **Halaman dan cetak.** Page Break Preview, area cetak, header dan footer, cetak, ekspor PDF.
+- **Berkas.** .xlsx dan .xlsm sebagai format utama, juga CSV dan TSV. Membuka buku kerja .xls
+  97-2003 (nilai, rumus, dan format angka), serta mengimpor data dari .xlsb dan .ods.
 
-> [!NOTE]
-> **ArtCraft is a community of artists from all walks of life.** Painters, photographers,
-> filmmakers, illustrators, designers, animators, hobbyists, and people who picked up a pencil
-> last week. If you make things, you're one of us. **[Come say hi on Discord](https://discord.gg/artcraft).**
+Gambaran jujur per bidang, termasuk yang belum ada, ada di [ROADMAP.md](ROADMAP.md),
+[daftar fitur](docs/parity-checklist.md), dan [daftar fungsi](docs/function-parity.md).
 
-<p align="center">
-  <a href="#a-look-around">A look around</a> ·
-  <a href="#why-gridcraft">Why GridCraft</a> ·
-  <a href="#quick-start">Quick start</a> ·
-  <a href="#for-agents-mcp-cli-and-the-control-channel">For agents</a> ·
-  <a href="#architecture">Architecture</a> ·
-  <a href="#roadmap">Roadmap</a> ·
-  <a href="#the-crafting-apps">The Crafting Apps</a> ·
-  <a href="#license-and-credits">License and credits</a>
-</p>
+## Privasi
 
-## A look around
+GridKu tidak punya akun, telemetri, analitik, atau laporan crash. Buku kerja dan berkas log
+tetap di komputer Anda dan tidak dikirim ke mana pun. Rumus yang membaca buku kerja lain hanya
+membaca berkas di komputer Anda, dan hanya bila Anda memintanya; fungsi `WEBSERVICE` tidak
+tersedia dan tidak mengambil apa pun.
 
-<table>
-<tr>
-<td width="50%" valign="top"><img src="docs/images/budget.png" alt="A household budget with accounting number formats, red highlights for overspent categories, a green-yellow-red colour scale on the percent-used column, a totals row with a double border, and a horizontal bar chart comparing budget with actual" width="100%"><p align="center"><sub><b>Formatting.</b> Accounting formats, cell styles, conditional rules and colour scales, frozen headers and a bar chart.</sub></p></td>
-<td width="50%" valign="top"><img src="docs/images/grades-formulas.png" alt="A gradebook table with averages and letter grades computed with IFS, green highlights on A grades and data bars, with the Formulas ribbon tab open showing the function library" width="100%"><p align="center"><sub><b>Formulas.</b> 500+ functions, dynamic arrays, LET and LAMBDA, structured table references.</sub></p></td>
-</tr>
-<tr>
-<td width="50%" valign="top"><img src="docs/images/dark-insert.png" alt="The sales dashboard in dark mode with the Insert ribbon tab open, showing Pivot Table, Table, Pictures, Shapes, chart, sparkline, link, comment, text box and symbol buttons" width="100%"><p align="center"><sub><b>Dark mode</b> and the Insert tab: tables, charts, sparklines, pictures, shapes, links and comments.</sub></p></td>
-<td width="50%" valign="top"><img src="docs/images/pivot.png" alt="A pivot table summarising revenue by region and product with a Channel report filter, grand totals and currency formatting, with the Pivot Table Fields pane open on the right showing ticked fields and the Filters, Columns, Rows and Values areas" width="100%"><p align="center"><sub><b>Pivot tables.</b> Field list, filters, layouts, date grouping and show-values-as, saved to and read from XLSX.</sub></p></td>
-</tr>
-<tr>
-<td width="50%" valign="top"><img src="docs/images/format-chart.png" alt="The sales dashboard with the column chart selected: resize handles on the chart, its source data outlined in the table, the Chart Design tab open and the Format Chart Area pane on the right" width="100%"><p align="center"><sub><b>Charts.</b> Seventeen chart types, Chart Design tab and a Format pane; selecting a chart outlines its source data.</sub></p></td>
-<td width="50%" valign="top"><img src="docs/images/page-break.png" alt="The household budget in Page Break Preview: the print area outlined in blue with a dashed page break, Page 1 and Page 2 watermarks, and the area outside the print range greyed out" width="100%"><p align="center"><sub><b>Page Break Preview</b>, print settings, and PDF export and printing.</sub></p></td>
-</tr>
-</table>
+Aplikasi desktop hanya terhubung ke jaringan dalam keadaan berikut:
 
-## Why GridCraft
+| Kapan | Ke mana | Apa yang dikirim |
+|---|---|---|
+| Setiap kali aplikasi desktop dimulai, dan saat memilih **Automate ▸ Check for Updates…** | GitHub (`api.github.com`): daftar rilis `andriyanto/gridku` | Satu permintaan daftar itu, berlabel `GridKu/Update`. Tidak ada data tentang Anda, komputer, atau buku kerja Anda. Seperti permintaan web lain, GitHub melihat alamat IP Anda. |
+| Saat menekan **Download** di pemberitahuan pembaruan, atau **Automate ▸ Download Latest…** | Peramban membuka halaman rilis di GitHub. Aplikasi tidak mengunduh atau memasang apa pun sendiri | Yang dikirim peramban Anda. |
+| Saat mengeklik tautan di sel atau di jendela About | Peramban membuka alamatnya | Yang dikirim peramban Anda. |
 
-- **Familiar.** Ribbon, formula bar, Name Box, sheet tabs, keyboard shortcuts, fill handle,
-  point-mode formula entry with coloured references, Format Cells, Paste Special,
-  conditional formatting, tables, charts and more. Everything is right where you expect it.
-- **Compatible.** XLSX is the native format: styles, themes, formulas (including dynamic arrays),
-  tables, conditional formats, validation, comments, hyperlinks, charts, pictures, sparklines,
-  pivot tables and print settings round-trip. CSV and TSV too.
-  Legacy 97-2003 `.xls` workbooks open with their values, formulas and number formats (formatting and objects not yet).
-  [XLSB worksheet data can be imported](docs/xlsb-import.md), using saved values instead of formulas.
-  [ODS worksheet data can be imported](docs/ods-import.md), using saved values instead of formulas.
-  [Static pictures can live inside cells](docs/cell-pictures.md), fitting their size and moving with the data.
-- **Capable.** A dependency-graph calculation engine with dynamic arrays and spilling,
-  500+ worksheet functions plus LET, LAMBDA, MAP, REDUCE, SCAN, BYROW, BYCOL and MAKEARRAY,
-  structured table references, a comprehensive number-format language, sort and AutoFilter,
-  Flash Fill, data validation, outlining and subtotals.
-- **Fast.** Copy-on-write workbooks (undo snapshots are nearly free), incremental recalculation,
-  and a virtualised grid that only lays out what's on screen.
-- **Agent-native.** Every ribbon button, menu item, dialog, keystroke and mouse gesture is a
-  command that agents can run over a JSON control channel, an **MCP server**, or the CLI.
-- **Everywhere.** One Rust codebase for desktop and the web. No subscription, no licence server,
-  no telemetry.
+Belum ada pengaturan untuk mematikan pemeriksaan pembaruan saat aplikasi dimulai. Kanal kontrol
+dan server MCP hanya berjalan bila Anda menjalankannya sendiri, dan kanal kontrol hanya menerima
+sambungan dari komputer yang sama (`127.0.0.1`). Pengelola repo ini tidak menerima data apa pun
+dari aplikasi.
 
-## Quick start
+## Unduhan dan pemasangan
 
-```sh
-cargo run --release -p gridcraft                              # desktop app
-cargo run --release -p gridcraft -- --sample sales            # open a sample (sales, budget, grades)
-cargo run --release -p gridcraft -- book.xlsx                 # open a workbook
-cargo run --release -p gridcraft -- --sample sales --control 7979   # + JSON control channel
-cargo xtask ci                                                 # fmt, clippy, tests, assets, layering, wasm
-```
+Setelah rilis GridKu pertama terbit, semua berkasnya ada di
+[rilis terbaru](https://github.com/andriyanto/gridku/releases/latest). `<ver>` adalah nomor
+versi, dan `SHA256SUMS.txt` memuat checksum setiap berkas.
 
-Choose Español under View → Interface language for [Spanish formula names, decimal commas, and semicolon arguments](docs/formula-input.md).
-Workbooks, clipboard exchange, and programmatic APIs retain canonical English syntax.
-
-### Web
-
-```sh
-cd apps/gridcraft-web && trunk build --release     # → dist/web (serve it with any static server)
-cd apps/gridcraft-web && trunk serve --release     # http://127.0.0.1:8771  (?sample=sales opens a sample)
-```
-
-You need [trunk](https://trunk-rs.github.io/trunk/) and the `wasm32-unknown-unknown` target. Open uses the
-browser's file picker (dropping files works too) and Save downloads the workbook.
-
-### Ribbon access keys
-
-Press and release **left Alt** on Windows/Linux/BSD, or press **F10** on any platform,
-then type a sequence below one key at a time. Keytips appear on the supported Home
-controls and menu items. On macOS, use F10 (Fn+F10 if required by your keyboard); Option
-remains available for entering accented characters.
-
-| Sequence after Alt/F10 | Action |
+| Sistem | Berkas |
 |---|---|
-| `H A L` / `H A C` / `H A R` | Align left / center / right |
-| `H V S` or legacy `E S` | Open Paste Special |
-| `H O I` or legacy `O C A` | AutoFit selected columns |
+| Windows x64 | `gridku-<ver>-windows-x64.msi` (installer) atau `gridku-<ver>-windows-x64-portable.zip` |
+| Windows ARM64 (Snapdragon) | `gridku-<ver>-windows-arm64.msi` atau `gridku-<ver>-windows-arm64-portable.zip` |
+| macOS (Apple silicon dan Intel) | `gridku-<ver>-macos-universal.dmg`; baris perintah: `gridku-cli-<ver>-macos-universal.zip` |
+| Linux x86_64 dan aarch64 | `gridku-<ver>-linux-<arch>.AppImage`, `.deb`, `.rpm`, atau `.tar.gz` |
 
-In Paste Special, **T/V/F/C** select formats/values/formulas/comments, and **E** toggles
-Transpose. **Enter** applies the selected options; **Escape** cancels the dialog.
-These letters also work with Alt held on Windows/Linux/BSD.
+Installer Windows memasang GridKu ke folder `Produktivitas\GridKu`:
 
-Escape backs out one keytip level; Alt/F10 again exits keytips. Clicking, scrolling,
-or switching windows cancels navigation. Access keys do not start while editing text
-or using another dialog. This is initial support for these Home and legacy paths;
-other ribbon commands and full mouse-free navigation remain to be implemented.
-Browsers or desktop environments may reserve Alt/F10 for their own menus.
-
-### Logs
-
-The desktop app writes its log to standard error and to `gridcraft.log` in the `logs` folder
-next to its settings: `~/.config/gridcraft/logs` on Linux and BSD (`$XDG_CONFIG_HOME/gridcraft/logs`
-when set), `~/Library/Application Support/GridCraft/logs` on macOS and
-`%APPDATA%\GridCraft\logs` on Windows. Each start moves the previous log to `gridcraft.1.log` and
-that one to `gridcraft.2.log`, so the log of a run that crashed survives the next start; attach
-them to a bug report. A log file stops growing at 16 MiB. By default GridCraft's own crates log
-at `info` and everything else at `warn`; `RUST_LOG` replaces that with env_logger-style
-directives, e.g. `RUST_LOG=debug` or `RUST_LOG=warn,gridcraft_engine=debug` (a trailing `*`
-matches a prefix: `gridcraft*=debug`). Runs with `GRIDCRAFT_NO_PREFS` set (no saved settings)
-log to standard error only.
-
-## For agents: MCP, CLI and the control channel
-
-```sh
-claude mcp add gridcraft -- gridcraft-cli mcp                 # headless MCP server
-gridcraft-cli mcp --connect 7979                               # MCP bridged to a running window
-gridcraft-cli eval '=XLOOKUP("b",{"a","b"},{1,2})'             # → 2
-gridcraft-cli run --sample budget --cmd 'home.bold={"range":"B4:F4"}' --out budget.xlsx
-gridcraft-cli cat budget.xlsx --range B4:F15                   # aligned text table
-gridcraft-cli commands --search chart                          # every command and its params
-```
-
-The MCP server offers tools such as `read_range`, `write_range`, `set_cell`, `evaluate_formula`,
-`format_range`, `insert_chart`, `create_table`, `sort_range`, `filter` and `execute_command`
-(which reaches every one of GridCraft's commands). The desktop app's control channel adds real
-pointer and keyboard input, dialogs and screenshots. See [`docs/mcp.md`](docs/mcp.md),
-[`docs/cli.md`](docs/cli.md) and [`docs/control-protocol.md`](docs/control-protocol.md).
-
-## Architecture
-
-GridCraft is an engine-first Cargo workspace with enforced layering (`cargo xtask layers`). The
-egui frontend is a separate crate, so the UI can be swapped without touching the engine.
-
-| Layer | Crates |
+| Jenis pemasangan | Folder |
 |---|---|
-| L0 | `core` (addresses, values, errors, dates, input parsing) · `numfmt` (number format codes) |
-| L1 | `formula` (lexer, parser, printer, reference adjustment) · `functions` (worksheet function library) |
-| L2 | `model` (workbook, sheets, copy-on-write cells, styles, tables, charts…) · `calc` (dependency graph, evaluator, dynamic arrays) · `xlsx` (XLSX, CSV, plus XLSB and ODS data import) |
-| L3 | `chart` (toolkit-free chart layout and rendering) |
-| L5 | `engine` (session, commands, history, clipboard, fill, sort, filter, file I/O) |
-| L6 | `ui-egui` (spreadsheet UI, control channel) · `mcp` (MCP server) |
-| L7 | `apps/gridcraft`, `apps/gridcraft-cli`, `apps/gridcraft-web` |
+| Hanya untuk saya (bawaan, tanpa hak administrator) | `%LOCALAPPDATA%\Programs\Produktivitas\GridKu` |
+| Untuk semua pengguna | `C:\Program Files\Produktivitas\GridKu` |
 
-- **Contributor and agent rules** (clean-room, asset policy, never-crash, quality gates): [`AGENTS.md`](AGENTS.md)
-- **Bundled assets:** each one is listed with its licence in [`ATTRIBUTION.md`](ATTRIBUTION.md)
-- **Releases:** signed macOS, Windows, Linux, BSD and web builds; see [`docs/releasing.md`](docs/releasing.md)
+GridKu adalah aplikasi tersendiri: ia bisa terpasang berdampingan dengan GridCraft dan tidak
+memakai pengaturan GridCraft. Pengaturan dan log GridKu ada di `%APPDATA%\GridKu` (Windows),
+`~/Library/Application Support/GridKu` (macOS), atau `~/.config/gridku` (Linux dan BSD).
 
-## Roadmap
+Berkas rilis repo ini **belum ditandatangani (code signing)**, jadi Windows SmartScreen dan macOS
+Gatekeeper akan memberi peringatan saat pertama dibuka. Periksa unduhan dengan `SHA256SUMS.txt`.
+Aplikasi memberi tahu bila ada versi baru, tetapi tidak pernah memasangnya sendiri: Anda yang
+mengunduh dan menjalankannya.
 
-GridCraft is in **alpha**: the core workflow works end to end, but depth, fidelity and file
-compatibility are still rough. It covers 89% of standard ribbon commands in our catalog
-([`docs/parity-checklist.md`](docs/parity-checklist.md)) and 513 standard worksheet functions
-([`docs/function-parity.md`](docs/function-parity.md)); this is a parity inventory, not a count of working implementations. Weighted by what spreadsheet users rely on, we
-estimate it is about 50% ready for real work. Next up: XLSX fidelity on real-world files, very large
-workbooks and multi-threaded recalc, chart depth, text in every script, and `.xls` import. Stage,
-numbers and estimates are in [ROADMAP.md](ROADMAP.md); the ranked work list is [`docs/gaps.md`](docs/gaps.md).
-
-## Downloads
-
-**Download GridCraft** from GitHub: the [latest release](https://github.com/andriyanto/gridcraft/releases/latest)
-has every build listed below, and [all releases](https://github.com/andriyanto/gridcraft/releases)
-has earlier versions and their notes. `<ver>` in the file names is the version number, and
-`SHA256SUMS.txt` lists a checksum for every file.
-
-These are this repository's own builds, and they are **not code-signed**
-([Code signing policy](#code-signing-policy)): Windows SmartScreen and macOS Gatekeeper warn
-before the first start. The app tells you about a new release but never installs it itself, on
-any system: **Download** in that prompt, and **Automate ▸ Download Latest…** at any time, open
-the releases page in your browser, and you download and run the new version yourself.
-
-The original project's signed builds, for every system it supports, are on
-[its own releases page](https://github.com/storytold/gridcraft/releases).
-
-| System | Files |
-|---|---|
-| Windows x64 (64-bit Intel/AMD) | `gridcraft-<ver>-windows-x64.msi`, `gridcraft-<ver>-windows-x64-portable.zip` |
-| Windows arm64 (Snapdragon and other ARM PCs) | `gridcraft-<ver>-windows-arm64.msi`, `gridcraft-<ver>-windows-arm64-portable.zip` |
-| macOS, universal (Apple silicon + Intel) | `gridcraft-<ver>-macos-universal.dmg`; command-line tool `gridcraft-cli-<ver>-macos-universal.zip`. Ad-hoc signature, not notarized |
-| Linux x86_64 | `gridcraft-<ver>-linux-x86_64.AppImage`, `.deb`, `.rpm`, `.tar.gz` |
-| Linux aarch64 (ARM64) | `gridcraft-<ver>-linux-aarch64.AppImage`, `.deb`, `.rpm`, `.tar.gz` |
-
-No 32-bit Windows, Flatpak, FreeBSD or web build is published here.
-
-### Windows troubleshooting
-
-**If the app doesn't open on Windows:** the desktop app initializes only DirectX 12 by default.
-Letting wgpu also create an OpenGL instance can crash some graphics drivers (AMD's
-`atio6axx.dll`) before the window appears, so the app would flash in Task Manager and quit.
-`WGPU_BACKEND` overrides the default for troubleshooting (for example `dx12` or `vulkan`). In
-PowerShell, from the folder containing the executable:
+**Kalau aplikasi tidak terbuka di Windows:** coba renderer lain lewat PowerShell, dari folder
+tempat `gridku.exe` berada:
 
 ```powershell
 $env:WGPU_BACKEND = "vulkan"
-& .\gridcraft.exe
-Remove-Item Env:WGPU_BACKEND                     # restore the default for later launches
+& .\gridku.exe
+Remove-Item Env:WGPU_BACKEND
 ```
 
-An explicit `gl` override can bring the driver crash back on affected systems, and `vulkan` can
-bring back a crash in some Intel UHD Graphics drivers (`igvk64.dll`, #120). The macOS, Linux and
-web backend defaults are unchanged.
+## Membangun dari kode sumber
 
-**If the app is slow on an older Windows PC, or DirectX 12 can't start:** when DirectX 12 finds no
-graphics card with a driver for it, it only offers the Windows-provided software renderer, which draws every
-frame on the processor. In that case GridCraft uses OpenGL instead, without setting anything; if
-the first renderer fails to start, it tries the other one once. The log file records the choice
-(lines starting with `graphics:`). `WGPU_BACKEND` still overrides it (and then nothing else is
-tried), e.g. `$env:WGPU_BACKEND = "gl"` or `"dx12"`.
+Perlu Rust versi terbaru (stable).
 
-DirectX 12 shaders are compiled with FXC, which is part of Windows, so no `dxcompiler.dll` or
-`dxil.dll` is needed, and a copy another program put on `PATH` can no longer stop the app at start
-("Parent device is lost", #339). `$env:WGPU_DX12_COMPILER = "dxc"` (or `"auto"`) selects wgpu's DXC
-handling again for troubleshooting.
+```sh
+git clone https://github.com/andriyanto/gridku
+cd gridku
+cargo run --release -p gridcraft -- --sample sales     # aplikasi desktop dengan contoh (sales, budget, grades)
+cargo run --release -p gridcraft -- laporan.xlsx       # membuka buku kerja
+```
 
-## The Crafting Apps
+Versi web dibangun dengan [trunk](https://trunk-rs.github.io/trunk/) dan target
+`wasm32-unknown-unknown`: `cd apps/gridcraft-web && trunk serve --release`.
 
-GridCraft is one of the **Crafting Apps**: free, open-source creative tools from the
-[ArtCraft](https://getartcraft.com/) team, each written from scratch in Rust and each able to
-stand on its own.
+Paket dan pustaka di dalam kode masih bernama `gridcraft` dan `gridcraft-*`, begitu juga variabel
+lingkungan `GRIDCRAFT_*`. Itu nama internal dan tidak tampil ke pengguna; program yang dihasilkan
+bernama `gridku` dan `gridku-cli`. `cargo xtask ci` menjalankan format, clippy, tes, pemeriksaan
+atribusi aset, pemeriksaan lapisan, dan build wasm.
 
-| | App | What it's for | Code | Learn more |
-|:-:|---|---|---|---|
-| <img src="https://raw.githubusercontent.com/storytold/photocraft/main/assets/app-icon/hicolor/64x64/apps/ai.storyteller.photocraft.png" alt="" width="32" height="32"> | **PhotoCraft** | Image editing: layers, masks, type and real PSD files | [GitHub](https://github.com/storytold/photocraft) | [Website](https://getartcraft.com/apps/photocraft) |
-| <img src="https://raw.githubusercontent.com/storytold/vectorcraft/main/assets/app-icon/hicolor/64x64/apps/ai.storyteller.vectorcraft.png" alt="" width="32" height="32"> | **VectorCraft** | Vector illustration | [GitHub](https://github.com/storytold/vectorcraft) | [Website](https://getartcraft.com/apps/vectorcraft) |
-| <img src="https://raw.githubusercontent.com/storytold/filmcraft/main/assets/app-icon/hicolor/64x64/apps/ai.storyteller.filmcraft.png" alt="" width="32" height="32"> | **FilmCraft** | Video editing, color and sound | [GitHub](https://github.com/storytold/filmcraft) | [Website](https://getartcraft.com/apps/filmcraft) |
-| <img src="https://raw.githubusercontent.com/storytold/lightcraft/main/assets/app-icon/hicolor/64x64/apps/ai.storyteller.lightcraft.png" alt="" width="32" height="32"> | **LightCraft** | Photo library and raw development | [GitHub](https://github.com/storytold/lightcraft) | [Website](https://getartcraft.com/apps/lightcraft) |
-| <img src="https://raw.githubusercontent.com/storytold/pdfcraft/main/assets/app-icon/hicolor/64x64/apps/ai.storyteller.pdfcraft.png" alt="" width="32" height="32"> | **PdfCraft** | Reading, organizing and protecting PDFs | [GitHub](https://github.com/storytold/pdfcraft) | [Website](https://getartcraft.com/apps/pdfcraft) |
-| <img src="https://raw.githubusercontent.com/storytold/effectcraft/main/assets/app-icon/hicolor/64x64/apps/ai.storyteller.effectcraft.png" alt="" width="32" height="32"> | **EffectCraft** | Motion graphics and visual effects | [GitHub](https://github.com/storytold/effectcraft) | [Website](https://getartcraft.com/apps/effectcraft) |
-| <img src="https://raw.githubusercontent.com/storytold/designcraft/main/assets/app-icon/hicolor/64x64/apps/ai.storyteller.designcraft.png" alt="" width="32" height="32"> | **DesignCraft** | Page layout and publishing | [GitHub](https://github.com/storytold/designcraft) | [Website](https://getartcraft.com/apps/designcraft) |
-| <img src="https://raw.githubusercontent.com/storytold/figcraft/main/assets/app-icon/hicolor/64x64/apps/ai.storyteller.figcraft.png" alt="" width="32" height="32"> | **FigCraft** | Interface design and prototyping | [GitHub](https://github.com/storytold/figcraft) | [Website](https://getartcraft.com/apps/figcraft) |
-| <img src="https://raw.githubusercontent.com/storytold/wordcraft/main/assets/app-icon/hicolor/64x64/apps/ai.storyteller.wordcraft.png" alt="" width="32" height="32"> | **WordCraft** | Word processing and documents | [GitHub](https://github.com/storytold/wordcraft) | [Website](https://getartcraft.com/apps/wordcraft) |
-| <img src="https://raw.githubusercontent.com/storytold/soundcraft/main/assets/app-icon/hicolor/64x64/apps/ai.storyteller.soundcraft.png" alt="" width="32" height="32"> | **SoundCraft** | Audio recording and editing | [GitHub](https://github.com/storytold/soundcraft) | [Website](https://getartcraft.com/apps/soundcraft) |
-| <img src="https://raw.githubusercontent.com/storytold/deckcraft/main/assets/app-icon/hicolor/64x64/apps/ai.storyteller.deckcraft.png" alt="" width="32" height="32"> | **DeckCraft** | Presentations and slide decks | [GitHub](https://github.com/storytold/deckcraft) | [Website](https://getartcraft.com/apps/deckcraft) |
-| <img src="https://raw.githubusercontent.com/storytold/cadcraft/main/assets/app-icon/hicolor/64x64/apps/ai.storyteller.cadcraft.png" alt="" width="32" height="32"> | **CADCraft** | Computer-aided design | [GitHub](https://github.com/storytold/cadcraft) | [Website](https://getartcraft.com/apps/cadcraft) |
-| <img src="https://raw.githubusercontent.com/storytold/gridcraft/main/assets/app-icon/hicolor/64x64/apps/ai.storyteller.gridcraft.png" alt="" width="32" height="32"> | **GridCraft** | Spreadsheets and data | [GitHub](https://github.com/storytold/gridcraft) | [Website](https://getartcraft.com/apps/gridcraft) |
-| <img src="https://raw.githubusercontent.com/storytold/texturecraft/main/assets/app-icon/hicolor/64x64/apps/ai.storyteller.texturecraft.png" alt="" width="32" height="32"> | **TextureCraft** | 3D texture painting | [GitHub](https://github.com/storytold/texturecraft) | [Website](https://getartcraft.com/apps/texturecraft) |
-| <img src="https://raw.githubusercontent.com/storytold/craft-anything/main/assets/app-icon/hicolor/64x64/apps/ai.storyteller.craft-anything.png" alt="" width="32" height="32"> | **Craft Anything** | See how any software works, then build your own | [GitHub](https://github.com/storytold/craft-anything) | [Website](https://getartcraft.com/apps/craft-anything) |
-| <img src="https://raw.githubusercontent.com/tangency-labs/solidcraft/main/assets/icons/app/linux/exports/hicolor/64x64/apps/io.tangencylabs.solidcraft.png" alt="" width="32" height="32"> | **SolidCraft** | Parametric 3D CAD by Tangency Labs (community app) | [GitHub](https://github.com/tangency-labs/solidcraft) | |
+## Baris perintah dan agen AI
 
-And [**ArtCraft**](https://getartcraft.com/) itself, our AI image and video studio for artists who want real control.
+Semua tindakan di GridKu adalah perintah bernama, sehingga bisa dijalankan tanpa antarmuka
+grafis lewat `gridku-cli`:
 
-<br>
+```sh
+gridku-cli eval '=XLOOKUP("b",{"a","b"},{1,2})'          # → 2
+gridku-cli convert laporan.xlsx laporan.pdf              # xlsx, csv, tsv, json, html, pdf
+gridku-cli cat laporan.xlsx --range A1:D20               # isi sel sebagai tabel teks
+gridku-cli run --sample budget --cmd 'home.bold={"range":"B4:F4"}' --out budget.xlsx
+gridku-cli commands --search chart                       # semua perintah dan parameternya
+```
 
-<p align="center">
-  <a href="https://discord.gg/artcraft"><img alt="Join the ArtCraft community on Discord" src="https://img.shields.io/badge/Join%20us%20on%20Discord-5865F2?style=for-the-badge&logo=discord&logoColor=white" height="40"></a>
-</p>
+`gridku-cli mcp` menjalankan server MCP untuk agen AI. Untuk mengendalikan aplikasi yang sedang
+berjalan, mulai aplikasinya dengan `gridku --control 7979`, lalu jalankan
+`gridku-cli mcp --connect 7979`. Rinciannya ada di [docs/mcp.md](docs/mcp.md),
+[docs/cli.md](docs/cli.md), dan [docs/control-protocol.md](docs/control-protocol.md).
 
-<h3 align="center">Come make things with us</h3>
+## Bantuan dan laporan masalah
 
-<p align="center">
-  Our Discord is where artists of every kind hang out: people who paint, shoot, draw, cut film,
-  set type, and people still figuring out what they like to make. Share what you're working on,
-  ask for help, tell us what's broken, or tell us what you wish these tools could do.
-  Whatever your medium and however long you've been at it, you're welcome here.
-</p>
+Laporkan masalah atau usulkan perbaikan di
+[Issues](https://github.com/andriyanto/gridku/issues). Sertakan versi GridKu (**Automate ›
+About GridKu**), sistem operasi, langkah untuk mengulang masalahnya, dan berkas log
+`logs/gridku.log` dari folder pengaturan di atas. Jangan melampirkan buku kerja yang berisi data
+pribadi.
 
-<p align="center">
-  <a href="https://discord.gg/artcraft"><b>discord.gg/artcraft</b></a> ·
-  <a href="https://getartcraft.com/">getartcraft.com</a> ·
-  <a href="https://getartcraft.com/apps">The Crafting Apps</a> ·
-  <a href="https://getartcraft.com/apps/gridcraft">GridCraft</a>
-</p>
+## Kebijakan code signing
 
-## Privacy
+**Status: berkas rilis repo ini belum ditandatangani.** Installer dan program Windows tidak
+bertanda tangan, dan build macOS hanya bertanda tangan ad hoc tanpa notarisasi.
 
-GridCraft has no accounts, no telemetry, no analytics and no crash reporting. Your workbooks and
-the [log file](#logs) stay on your computer, and nothing in them is sent anywhere. A formula that
-reads another workbook reads a file on your computer only, and only when you ask it to; the
-`WEBSERVICE` function is not available and fetches nothing.
+Cara rilis dibuat:
 
-A desktop build made from this repository connects to the network in these cases only:
+- Setiap perubahan masuk ke `main` lewat pull request. Banyak di antaranya disiapkan dengan agen
+  AI (Claude), dan commit-nya menyebutkannya; pengelola meninjau dan menggabungkan masing-masing.
+- Berkas rilis dibangun oleh GitHub Actions di repo ini dari commit yang ada di `main`
+  ([`.github/workflows/release-unsigned.yml`](.github/workflows/release-unsigned.yml)). Tidak ada
+  yang dibangun di komputer pribadi lalu diterbitkan.
+- Rilis tetap berupa draf sampai pengelola memeriksa dan menerbitkannya.
 
-| When | Where | What is sent |
-|---|---|---|
-| Each time the desktop app starts, and when you choose **Automate ▸ Check for Updates…** | GitHub (`api.github.com`): the list of releases of `andriyanto/gridcraft` | One request for that list, labelled `GridCraft/Update`. Nothing about you, your computer or your workbooks. Like any web request, it shows GitHub your IP address. |
-| When you press **Download** in the update prompt, or choose **Automate ▸ Download Latest…** | Your web browser opens the releases page on GitHub. The app downloads and installs nothing itself | Whatever your browser sends. |
-| When you click a link in a cell or in the About window | Your web browser opens the address | Whatever your browser sends. |
+Peran: committer, peninjau, dan penyetuju adalah [@andriyanto](https://github.com/andriyanto).
 
-There is no setting yet that turns off the update check at start. Printing goes through the
-printers your system has set up. The control channel runs only when you start it and accepts
-connections from the same computer only (`127.0.0.1`); the MCP server talks to the program that
-started it, over its standard input and output.
+## Asal-usul dan lisensi
 
-GitHub handles those requests under its own policy, the
-[GitHub General Privacy Statement](https://docs.github.com/en/site-policy/privacy-policies/github-general-privacy-statement).
-The maintainer of this repository receives no data from the app.
+GridKu adalah versi modifikasi dari [GridCraft](https://github.com/storytold/gridcraft) dan
+dikembangkan sebagai proyek tersendiri di repo ini. GridKu tidak dibuat, disponsori, atau
+didukung oleh ArtCraft Team; nama dan logo ArtCraft adalah merek dagang mereka dan tidak dipakai
+di sini.
 
-## Code signing policy
+Kode berlisensi ganda, pilih salah satu:
 
-**Status: the builds published here are not code-signed.** Windows installers and executables
-carry no signature, and the macOS builds carry an ad-hoc signature and are not notarized. Verify
-a download against `SHA256SUMS.txt` in the same release.
+- [MIT](LICENSE-MIT)
+- [Apache License 2.0](LICENSE-APACHE)
 
-How a release is made:
-
-- Since this copy was made, every change has reached `main` through a pull request. Many are
-  prepared with an AI coding agent (Claude), and the commits say so; the maintainer reviews and
-  merges each one.
-- Release files are built by GitHub Actions in this repository, from a commit that is on `main`
-  ([`.github/workflows/release-unsigned.yml`](.github/workflows/release-unsigned.yml),
-  [docs/releasing.md](docs/releasing.md)). Nothing built on a personal computer is published.
-- A release is a draft until the maintainer has checked it and publishes it.
-
-Team roles:
-
-- Committers and reviewers: [@andriyanto](https://github.com/andriyanto)
-- Approvers: [@andriyanto](https://github.com/andriyanto)
-
-What these builds send over the network is described under [Privacy](#privacy).
-
-## License and credits
-
-GridCraft is dual-licensed under [MIT](LICENSE-MIT) or [Apache-2.0](LICENSE-APACHE), at your option.
-Copyright (c) 2026 ArtCraft Team and the GridCraft contributors. Required notices are in [NOTICE](NOTICE).
-
-Bundled fonts, icons, images and other assets keep their own open licenses; each one is listed
-with its author, source and license in [ATTRIBUTION.md](ATTRIBUTION.md).
-
-All UI icons are drawn in code and are original; the sample workbooks and every screenshot in
-this README were made with GridCraft itself. GridCraft bundles no fonts: it uses the fonts
-installed on your system.
-
-The ArtCraft name, wordmark and logos in [`docs/brand/`](docs/brand/) are trademarks of the
-ArtCraft Team and are not covered by this license; their terms are in
-[`docs/brand/LICENSE-brand.txt`](docs/brand/LICENSE-brand.txt). This modified copy does not show
-them: it is based on GridCraft by the ArtCraft team, and is not an ArtCraft product.
-
-<br>
-
-<p align="center">
-  <sub>Based on GridCraft, made by the <a href="https://getartcraft.com/">ArtCraft</a> team and community.</sub>
-</p>
+Hak cipta (c) 2026 ArtCraft Team dan para kontributor GridCraft; perubahan untuk GridKu: hak
+cipta (c) 2026 andriyanto dan para kontributor GridKu. Pemberitahuan yang diwajibkan lisensi
+pihak ketiga ada di [NOTICE](NOTICE), dan setiap aset beserta pembuat, sumber, dan lisensinya ada
+di [ATTRIBUTION.md](ATTRIBUTION.md). Ikon GridKu dirancang oleh andriyanto; huruf pada ikon
+adalah garis luar DejaVu Sans Condensed Bold (lisensi Bitstream Vera).

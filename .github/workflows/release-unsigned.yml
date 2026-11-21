@@ -4,7 +4,7 @@
 # cannot run here.
 #
 # Run it from the Actions tab on `main` with "draft" ticked: it builds everything and leaves a draft
-# GitHub Release `GridCraft v<version>` with SHA256SUMS.txt for the owner to review and publish.
+# GitHub Release `GridKu v<version>` with SHA256SUMS.txt for the owner to review and publish.
 # A pull request that changes this file builds everything too, without drafting a release.
 name: Release (unsigned)
 
@@ -48,7 +48,7 @@ jobs:
         name: Resolve version
         uses: storytold/craft-common-actions/actions/resolve-version@2c06746765d368723dc28ac3a44b04f841bec4da
         with:
-          app-title: GridCraft
+          app-title: GridKu
 
   macos:
     timeout-minutes: 120
@@ -65,7 +65,7 @@ jobs:
           persist-credentials: false
       - uses: storytold/craft-common-actions/actions/export-app-build-env@2c06746765d368723dc28ac3a44b04f841bec4da
         with:
-          app-name: gridcraft
+          app-name: gridku
           version: ${{ needs.version.outputs.version }}
           date: ${{ needs.version.outputs.date }}
       - uses: storytold/craft-common-actions/actions/checkout-craft-fonts@2c06746765d368723dc28ac3a44b04f841bec4da
@@ -112,7 +112,7 @@ jobs:
           persist-credentials: false
       - uses: storytold/craft-common-actions/actions/export-app-build-env@2c06746765d368723dc28ac3a44b04f841bec4da
         with:
-          app-name: gridcraft
+          app-name: gridku
           version: ${{ needs.version.outputs.version }}
           date: ${{ needs.version.outputs.date }}
       - uses: storytold/craft-common-actions/actions/checkout-craft-fonts@2c06746765d368723dc28ac3a44b04f841bec4da
@@ -160,7 +160,7 @@ jobs:
           persist-credentials: false
       - uses: storytold/craft-common-actions/actions/export-app-build-env@2c06746765d368723dc28ac3a44b04f841bec4da
         with:
-          app-name: gridcraft
+          app-name: gridku
           version: ${{ needs.version.outputs.version }}
           date: ${{ needs.version.outputs.date }}
       - uses: storytold/craft-common-actions/actions/checkout-craft-fonts@2c06746765d368723dc28ac3a44b04f841bec4da
@@ -201,6 +201,6 @@ jobs:
       - uses: storytold/craft-common-actions/actions/draft-release@2c06746765d368723dc28ac3a44b04f841bec4da
         with:
           version: ${{ needs.version.outputs.version }}
-          app-title: GridCraft
+          app-title: GridKu
           prerelease: ${{ needs.version.outputs.prerelease }}
           github-token: ${{ secrets.GITHUB_TOKEN }}

@@ -46,7 +46,7 @@ jobs:
           persist-credentials: false
       - id: v
         name: Resolve version
-        uses: storytold/craft-common-actions/actions/resolve-version@293de72429d3ed5d9fa92aded5e500544c0fa28f
+        uses: storytold/craft-common-actions/actions/resolve-version@2c06746765d368723dc28ac3a44b04f841bec4da
         with:
           app-title: GridCraft
 
@@ -63,15 +63,15 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
-      - uses: storytold/craft-common-actions/actions/export-app-build-env@293de72429d3ed5d9fa92aded5e500544c0fa28f
+      - uses: storytold/craft-common-actions/actions/export-app-build-env@2c06746765d368723dc28ac3a44b04f841bec4da
         with:
           app-name: gridcraft
           version: ${{ needs.version.outputs.version }}
           date: ${{ needs.version.outputs.date }}
-      - uses: storytold/craft-common-actions/actions/checkout-craft-fonts@293de72429d3ed5d9fa92aded5e500544c0fa28f
+      - uses: storytold/craft-common-actions/actions/checkout-craft-fonts@2c06746765d368723dc28ac3a44b04f841bec4da
         with:
           ref: ${{ env.CRAFT_FONTS_REF }}
-      - uses: storytold/craft-common-actions/actions/checkout-craft-i18n@293de72429d3ed5d9fa92aded5e500544c0fa28f
+      - uses: storytold/craft-common-actions/actions/checkout-craft-i18n@2c06746765d368723dc28ac3a44b04f841bec4da
       - uses: step-security/dtolnay-rust-toolchain@8dd607977d06adf4ed49b190381e74c17a9dd25f # v1.0.0
         with:
           toolchain: stable
@@ -110,15 +110,15 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
-      - uses: storytold/craft-common-actions/actions/export-app-build-env@293de72429d3ed5d9fa92aded5e500544c0fa28f
+      - uses: storytold/craft-common-actions/actions/export-app-build-env@2c06746765d368723dc28ac3a44b04f841bec4da
         with:
           app-name: gridcraft
           version: ${{ needs.version.outputs.version }}
           date: ${{ needs.version.outputs.date }}
-      - uses: storytold/craft-common-actions/actions/checkout-craft-fonts@293de72429d3ed5d9fa92aded5e500544c0fa28f
+      - uses: storytold/craft-common-actions/actions/checkout-craft-fonts@2c06746765d368723dc28ac3a44b04f841bec4da
         with:
           ref: ${{ env.CRAFT_FONTS_REF }}
-      - uses: storytold/craft-common-actions/actions/checkout-craft-i18n@293de72429d3ed5d9fa92aded5e500544c0fa28f
+      - uses: storytold/craft-common-actions/actions/checkout-craft-i18n@2c06746765d368723dc28ac3a44b04f841bec4da
       - uses: step-security/dtolnay-rust-toolchain@8dd607977d06adf4ed49b190381e74c17a9dd25f # v1.0.0
         with:
           toolchain: stable
@@ -126,7 +126,7 @@ jobs:
       - uses: step-security/rust-cache@8871c8ba063416da7c32246932ea6ae08700453e # v2.9.2
         with:
           key: unsigned-windows-${{ matrix.arch }}
-      - uses: storytold/craft-common-actions/actions/install-wix@293de72429d3ed5d9fa92aded5e500544c0fa28f
+      - uses: storytold/craft-common-actions/actions/install-wix@2c06746765d368723dc28ac3a44b04f841bec4da
       - name: Build and package (unsigned)
         shell: pwsh
         env:
@@ -158,16 +158,16 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
-      - uses: storytold/craft-common-actions/actions/export-app-build-env@293de72429d3ed5d9fa92aded5e500544c0fa28f
+      - uses: storytold/craft-common-actions/actions/export-app-build-env@2c06746765d368723dc28ac3a44b04f841bec4da
         with:
           app-name: gridcraft
           version: ${{ needs.version.outputs.version }}
           date: ${{ needs.version.outputs.date }}
-      - uses: storytold/craft-common-actions/actions/checkout-craft-fonts@293de72429d3ed5d9fa92aded5e500544c0fa28f
+      - uses: storytold/craft-common-actions/actions/checkout-craft-fonts@2c06746765d368723dc28ac3a44b04f841bec4da
         with:
           ref: ${{ env.CRAFT_FONTS_REF }}
-      - uses: storytold/craft-common-actions/actions/checkout-craft-i18n@293de72429d3ed5d9fa92aded5e500544c0fa28f
-      - uses: storytold/craft-common-actions/actions/install-linux-deps@293de72429d3ed5d9fa92aded5e500544c0fa28f
+      - uses: storytold/craft-common-actions/actions/checkout-craft-i18n@2c06746765d368723dc28ac3a44b04f841bec4da
+      - uses: storytold/craft-common-actions/actions/install-linux-deps@2c06746765d368723dc28ac3a44b04f841bec4da
         with:
           deb-arch: ${{ matrix.deb }}
           nfpm-version: "2.47.0"
@@ -198,7 +198,7 @@ jobs:
     permissions:
       contents: write
     steps:
-      - uses: storytold/craft-common-actions/actions/draft-release@293de72429d3ed5d9fa92aded5e500544c0fa28f
+      - uses: storytold/craft-common-actions/actions/draft-release@2c06746765d368723dc28ac3a44b04f841bec4da
         with:
           version: ${{ needs.version.outputs.version }}
           app-title: GridCraft

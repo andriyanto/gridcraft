@@ -8,6 +8,10 @@ GridKu is a modified version of GridCraft (https://github.com/storytold/gridcraf
 sponsored or endorsed by the ArtCraft Team. The ArtCraft name, wordmark and logos are trademarks of
 the ArtCraft Team; as their terms ask of modified versions, they are not included here.
 
+crates/update is a copy of craft-update from craft-libs (https://github.com/storytold/craft-libs,
+commit 1b34eba), copyright (c) 2026 ArtCraft Team and the craft-libs contributors, under the same
+MIT OR Apache-2.0 licence; changed for GridKu.
+
 Third-party material
 
 This product bundles third-party material under its own licenses, listed below. The per-file

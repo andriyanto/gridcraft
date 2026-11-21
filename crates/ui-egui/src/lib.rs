@@ -8,7 +8,7 @@
 
 /// The GitHub repository GridKu's releases come from: the only place it looks for a newer
 /// version, and the only place an update is downloaded from. GridKu is its own project (it
-/// started from GridCraft), so that is its own repository, not the one craft-update lists for the
+/// started from GridCraft), so that is its own repository, not the one the update module lists for the
 /// Craft App Suite.
 pub const UPDATE_REPO: &str = "andriyanto/gridku";
 /// GridKu's page: its repository.
@@ -16,11 +16,11 @@ pub const REPO_URL: &str = "https://github.com/andriyanto/gridku";
 /// Where GridKu's releases are downloaded.
 pub const RELEASES_URL: &str = "https://github.com/andriyanto/gridku/releases";
 
-/// GridKu as craft-update knows it, with its 128 px icon and accent colour: the update
+/// GridKu as the update module knows it, with its 128 px icon and accent colour: the update
 /// prompt shows both, and an AppImage's menu entry gets the icon. Its releases, and who the
 /// prompt says they are by, are this repository's ([`UPDATE_REPO`]).
 #[cfg(not(target_arch = "wasm32"))]
-pub const UPDATE_APP: craft_update::app::App = craft_update::app::App {
+pub const UPDATE_APP: gridcraft_update::app::App = gridcraft_update::app::App {
     // The programs are `gridku` and `gridku-cli`, and release assets are named `gridku-<version>-…`.
     id: "gridku",
     name: "GridKu",

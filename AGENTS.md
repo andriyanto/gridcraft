@@ -60,6 +60,14 @@ environment variables `GRIDCRAFT_*`; the programs are `gridku` and `gridku-cli`,
 person sees says GridKu. The rest of this file is the original project's, with the program names
 updated.
 
+**Time goes through `jiff`, not `chrono`.** The shared Rust rule 5 above names `chrono`, and the
+house-rules check keeps that block word for word, but chrono was declared unmaintained
+(RUSTSEC-2026-0543, November 2026) and this repository moved to `jiff`, the advisory's
+recommended replacement. Do not hand-roll calendar conversion; dates outside jiff's years
+-9999..=9999 use the 400-year cycle the existing helpers in `crates/core/src/date.rs` already use.
+The update check and its windows are this repository's own copy of craft-libs' `craft-update`
+(`crates/update`, package `gridcraft-update`); it no longer follows craft-libs.
+
 GridCraft is a clean-room, open-source, Rust-native spreadsheet targeting Microsoft Excel parity — and superiority (speed, openness, agent control). It runs natively on macOS, Windows, Linux and BSD, and on the web via WASM. Siblings with the same conventions: `../designcraft` (InDesign-class, the closest reference), `../photocraft` (Photoshop), `../vectorcraft` (Illustrator), `../pdfcraft` (Acrobat), `../filmcraft` (Premiere), `../lightcraft` (Lightroom), `../effectcraft` (After Effects).
 
 ## Start every session here

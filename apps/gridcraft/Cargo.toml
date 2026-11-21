@@ -25,7 +25,7 @@ egui = { workspace = true }
 serde_json = { workspace = true }
 log = { workspace = true }
 image = { workspace = true }
-chrono = { workspace = true }
+jiff = { workspace = true }
 
 [build-dependencies]
 # Icon + VERSIONINFO for gridcraft.exe; build.rs only uses it when the target is Windows.
@@ -39,7 +39,7 @@ winit = { version = "0.30", default-features = false, features = ["x11"] }
 winit = { version = "0.30", default-features = false, features = ["x11", "wayland-csd-adwaita-notitle"] }
 
 [target.'cfg(not(target_arch = "wasm32"))'.dependencies]
-# Same craft-libs revision as the workspace's craft-update and craft-window (see the root
+# Same craft-libs revision as the workspace's craft-window (see the root
 # Cargo.toml).
 craft-print = { git = "https://github.com/storytold/craft-libs", rev = "1b34eba41e62138fc2438d2734523b302840b45d" }
 rfd = { workspace = true }

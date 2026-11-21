@@ -26,23 +26,23 @@ gridcraft-ui-egui = { path = "crates/ui-egui" }
 gridcraft-mcp = { path = "crates/mcp" }
 gridcraft-pdf = { path = "crates/pdf" }
 gridcraft-math = { path = "crates/math" }
-# Every craft-libs crate (craft-update and craft-window here, craft-ui in ui-egui, craft-print in
-# the app) comes from one craft-libs revision.
-# craft-update: app-specific pretend versions apply to startup and manual checks.
-craft-update = { git = "https://github.com/storytold/craft-libs", rev = "1b34eba41e62138fc2438d2734523b302840b45d", version = "=0.1.0", features = ["egui"] }
+# Every craft-libs crate (craft-window here, craft-ui in ui-egui, craft-print in the app) comes
+# from one craft-libs revision.
+# GridKu's own copy of craft-libs' craft-update (crates/update); it no longer follows craft-libs.
+gridcraft-update = { path = "crates/update" }
 
 # foundation
 thiserror = "2"
 serde = { version = "1", features = ["derive", "rc"] }
 serde_json = { version = "1", features = ["float_roundtrip"] }
 log = "0.4"
-# All date/time conversion goes through chrono (no hand-rolled calendar code beyond the 400-year range extension; AGENTS.md).
-chrono = { version = "0.4.45", default-features = false, features = ["std", "clock"] }
+# All date/time conversion goes through jiff (no hand-rolled calendar code beyond the 400-year range extension; AGENTS.md).
+jiff = { version = "1", default-features = false, features = ["std"] }
 web-time = "1.1.0"
 rayon = "1"
 regex = { version = "1", default-features = false, features = ["std", "unicode", "perf"] }
 quick-xml = "0.41"
-zip = { version = "3", default-features = false, features = ["deflate"] }
+zip = { version = "9.1", default-features = false, features = ["deflate"] }
 sha2 = { version = "0.11", default-features = false }
 # Decrypting password-protected workbooks ([MS-OFFCRYPTO]): AES and SHA-1, pure Rust (wasm-safe).
 aes = { version = "0.9", default-features = false }
@@ -71,7 +71,7 @@ skrifa = { version = "0.44", default-features = false, features = ["std"] }
 # Real font bytes for tests (Ubuntu Light, compiled into epaint).
 epaint_default_fonts = "0.37"
 # One native window per workbook: the window list, Window menu titles and the immediate-viewport
-# driver. Same craft-libs revision as craft-update above.
+# driver. Same craft-libs revision as the other craft-libs crates.
 craft-window = { version = "0.1.0", git = "https://github.com/storytold/craft-libs", rev = "1b34eba41e62138fc2438d2734523b302840b45d", default-features = false, features = ["egui"] }
 
 [workspace.lints.rust]

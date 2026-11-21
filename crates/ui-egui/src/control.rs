@@ -263,6 +263,8 @@ pub fn handle(app: &mut SheetApp, ctx: &egui::Context, method: &str, p: &Json) -
                 ("ui.ribbonTab", "Ribbon Tab", ""),
                 ("app.checkForUpdates", "Check for Updates…", ""),
                 ("app.downloadUpdate", "Download Latest Version…", ""),
+                ("app.community", "Join the Community", ""),
+                ("app.discussions", "Discussions", ""),
                 ("view.collapseRibbon", "Collapse Ribbon", ""),
                 (
                     "view.expandFormulaBar",

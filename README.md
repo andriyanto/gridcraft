@@ -133,6 +133,19 @@ berjalan, mulai aplikasinya dengan `gridku --control 7979`, lalu jalankan
 `gridku-cli mcp --connect 7979`. Rinciannya ada di [docs/mcp.md](docs/mcp.md),
 [docs/cli.md](docs/cli.md), dan [docs/control-protocol.md](docs/control-protocol.md).
 
+## Komunitas
+
+Tombol **Join the Community** di GridKu membuka bagian ini.
+
+- **Grup WhatsApp:** [Gabung grup komunitas GridKu](https://chat.whatsapp.com/F0DewxhRINe3WFSrgMAmgD)
+  untuk tanya jawab santai dan kabar terbaru. Nomor HP Anda terlihat oleh anggota lain di grup,
+  jadi bergabunglah hanya jika Anda nyaman dengan itu.
+- **[GitHub Discussions](https://github.com/andriyanto/gridku/discussions):** untuk pertanyaan,
+  ide, dan diskusi yang bisa dicari lagi nanti, tanpa membagikan nomor HP.
+
+Laporan masalah sebaiknya tetap lewat [Issues](https://github.com/andriyanto/gridku/issues), supaya
+tidak tenggelam di obrolan.
+
 ## Bantuan dan laporan masalah
 
 Laporkan masalah atau usulkan perbaikan di

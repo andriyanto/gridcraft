@@ -27,6 +27,9 @@ pub(super) fn about(ui: &mut egui::Ui, d: &mut Dialog) {
             ui.hyperlink_to("GridKu on GitHub: github.com/andriyanto/gridku", crate::REPO_URL);
             ui.hyperlink_to("Downloads: github.com/andriyanto/gridku/releases", crate::RELEASES_URL);
             ui.hyperlink_to("Original project: github.com/storytold/gridcraft", "https://github.com/storytold/gridcraft");
+            ui.add_space(4.0);
+            ui.hyperlink_to("Join the community (WhatsApp group)", crate::COMMUNITY_URL);
+            ui.hyperlink_to("Discussions: github.com/andriyanto/gridku/discussions", crate::DISCUSSIONS_URL);
             ui.add_space(6.0);
             // The licences ask that the original copyright notice stay with the program.
             ui.label(

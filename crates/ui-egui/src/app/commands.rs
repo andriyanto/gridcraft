@@ -207,6 +207,14 @@ impl SheetApp {
                 self.download_update();
                 Ok(Json::Null)
             }
+            "app.community" | "help.community" => {
+                self.open_link(crate::COMMUNITY_URL);
+                Ok(Json::Null)
+            }
+            "app.discussions" | "help.discussions" => {
+                self.open_link(crate::DISCUSSIONS_URL);
+                Ok(Json::Null)
+            }
             "ui.printSettings" => printing::settings(&mut self.printing, p, self.services.printers.as_ref()),
             "ui.printSubmit" => self.submit_print(p.clone()),
             "ui.ribbonTab" => {

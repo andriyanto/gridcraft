@@ -183,6 +183,8 @@ fn tree() -> Vec<(&'static str, Vec<Entry>)> {
             vec![
                 ("Check for Updates…", "app.checkForUpdates", None),
                 ("Download Latest Version…", "app.downloadUpdate", None),
+                ("Join the Community", "app.community", None),
+                ("Discussions", "app.discussions", None),
                 ("Agent Control (MCP)…", "dialog:agents", None),
                 ("Contributors…", "dialog:about:Contributors", None),
                 ("GridKu on GitHub", "url:https://github.com/andriyanto/gridku", None),

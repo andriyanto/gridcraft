@@ -68,6 +68,14 @@ impl SheetApp {
     /// Automate ▸ Download Latest… (Help ▸ Download Latest Version… on macOS): open this
     /// repository's releases page in the browser.
     /// GridCraft never installs an update itself; the person downloads and runs the installer.
+    /// Opens `url` in the browser, or says where to go when there is no browser to open it with.
+    pub fn open_link(&mut self, url: &str) {
+        match &self.services.open_url {
+            Some(open) => open(url),
+            None => self.message = Some(("GridKu".into(), format!("Open {url} in your browser"))),
+        }
+    }
+
     pub fn download_update(&mut self) {
         #[cfg(not(target_arch = "wasm32"))]
         {

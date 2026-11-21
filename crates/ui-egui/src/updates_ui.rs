@@ -331,4 +331,23 @@ mod tests {
         app.run("app.downloadUpdate", serde_json::json!({})).unwrap();
         assert_eq!(*opened.lock().unwrap(), ["https://github.com/andriyanto/gridku/releases"]);
     }
+
+    /// Join the community opens the README's community section (which holds the WhatsApp
+    /// invite, so a reset invite needs no new release); Discussions opens GitHub Discussions.
+    #[test]
+    fn the_community_commands_open_the_readme_section_and_discussions() {
+        let (mut app, opened) = app_with(Ok(None));
+        app.run("app.community", serde_json::json!({})).unwrap();
+        app.run("app.discussions", serde_json::json!({})).unwrap();
+        assert_eq!(*opened.lock().unwrap(), ["https://github.com/andriyanto/gridku#komunitas", "https://github.com/andriyanto/gridku/discussions"]);
+    }
+
+    /// GitHub turns the README's “## Komunitas” heading into the `#komunitas` anchor the
+    /// community link points at: renaming it would leave the link opening the top of the README.
+    #[test]
+    fn the_community_link_lands_on_the_readmes_community_section() {
+        let readme = include_str!("../../../README.md");
+        assert_eq!(crate::COMMUNITY_URL.rsplit_once('#').map(|(_, a)| a), Some("komunitas"));
+        assert!(readme.lines().any(|l| l == "## Komunitas"), "README.md has no “## Komunitas” heading");
+    }
 }

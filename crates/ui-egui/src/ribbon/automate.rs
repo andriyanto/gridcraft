@@ -101,6 +101,14 @@ pub(super) fn automate(app: &mut SheetApp, ui: &mut Ui) {
     if __k.clicked() {
         app.run_or_alert("app.downloadUpdate", json!({}));
     }
+    let __k = big_button(ui, Icon::Script, "Join the\nCommunity", "The GridKu community: its WhatsApp group and Discussions", false);
+    if __k.clicked() {
+        app.run_or_alert("app.community", json!({}));
+    }
+    let __k = big_button(ui, Icon::Script, "Discussions", "Questions and ideas on GitHub Discussions", false);
+    if __k.clicked() {
+        app.run_or_alert("app.discussions", json!({}));
+    }
     let __k = big_button(ui, Icon::Script, "About\nGridKu", "Version, contributors and the AI models that helped", false);
     control_keytip(app, ui, &__k, "about");
     if __k.clicked() {

@@ -15,6 +15,12 @@ pub const UPDATE_REPO: &str = "andriyanto/gridku";
 pub const REPO_URL: &str = "https://github.com/andriyanto/gridku";
 /// Where GridKu's releases are downloaded.
 pub const RELEASES_URL: &str = "https://github.com/andriyanto/gridku/releases";
+/// The README's community section, which holds the WhatsApp group's invite. The app links to the
+/// section, not to the invite itself: an invite that is reset (after spam, say) would otherwise
+/// leave every installed copy pointing at a dead link, while the README can be changed at once.
+pub const COMMUNITY_URL: &str = "https://github.com/andriyanto/gridku#komunitas";
+/// Questions, ideas and conversation that are not problem reports.
+pub const DISCUSSIONS_URL: &str = "https://github.com/andriyanto/gridku/discussions";
 
 /// GridKu as the update module knows it, with its 128 px icon and accent colour: the update
 /// prompt shows both, and an AppImage's menu entry gets the icon. Its releases, and who the
